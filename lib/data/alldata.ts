@@ -213,6 +213,8 @@ export async function fetchDailySeries(days = 14): Promise<DailyPoint[]> {
   const incomes = await Income.find({ createdAt: { $gte: start, $lte: end } }).lean();
   const outcomes = await Outcome.find({ createdAt: { $gte: start, $lte: end } }).lean();
 
+
+ 
   const mapIncome = new Map<string, number>();
   const mapOutcome = new Map<string, number>();
 
@@ -231,6 +233,7 @@ export async function fetchDailySeries(days = 14): Promise<DailyPoint[]> {
     return { date, income, outcome, profit: income - outcome };
   });
 }
+
 
 export async function fetchOutcomes() {
   try {

@@ -4,6 +4,7 @@ const IncomeSchema = new Schema(
   {
     date: {
       type: Date,
+      required: true,
     },
     amount: {
       type: Number,
@@ -26,3 +27,4 @@ const IncomeSchema = new Schema(
 );
 const Income = models?.Income || model("Income", IncomeSchema);
 export default Income;
+

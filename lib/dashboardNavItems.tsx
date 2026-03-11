@@ -10,6 +10,8 @@ import {
   IconChartBar,
   IconSettings,
 } from "@tabler/icons-react";
+import { FaRegFileCode } from "react-icons/fa";
+
 
 export const dashboardNavItems = [
 
@@ -42,6 +44,12 @@ export const dashboardNavItems = [
     title: "Reports",
     icon: <IconChartBar className="h-full w-full" />,
     href: "/dashboard/reports",
+  },
+  {
+    title: "Code Snippets",
+    icon: <FaRegFileCode className="h-full w-full" />,
+    href: "/dashboard/daily",
+
   },
 
   {
