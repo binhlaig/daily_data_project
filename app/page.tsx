@@ -1,1345 +1,575 @@
+
+
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Send,
-  ChevronLeft,
-  ChevronRight,
-  CheckCircle2,
-  Sparkles,
+  Send, ChevronLeft, ChevronRight, CheckCircle2,
+  Moon, Sun, TrendingUp, Bot, Zap,
 } from "lucide-react";
-
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-
-// Table
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-
-// Dialog
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
+  Dialog, DialogContent, DialogHeader,
+  DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
-
-// Charts
 import {
-  ResponsiveContainer,
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  Tooltip,
-  CartesianGrid,
-  BarChart,
-  Bar,
+  ResponsiveContainer, LineChart, Line, XAxis, YAxis,
+  Tooltip, CartesianGrid, BarChart, Bar,
 } from "recharts";
+import OutcomeChartsCard from "@/components/ai/OtcomeChartpage";
 
+// ─── Types ────────────────────────────────────────────────────────────────────
 type Mode = "outcome" | "income";
 type DetectKind = Mode | "mixed";
+type RemittanceStatus = "pending" | "paid" | "cancelled";
+type DesignKind = Mode;
 
 type PosterMeta = {
-  size?: string | null;
-  title?: string | null;
-  subtitle?: string | null;
-  bullets?: string[] | null;
-  footer?: string | null;
-  theme?: string | null;
-  style?: string | null;
+  size?: string | null; title?: string | null; subtitle?: string | null;
+  bullets?: string[] | null; footer?: string | null; theme?: string | null; style?: string | null;
 };
-
-type AICard = {
-  label?: string;
-  value?: any;
-};
-
-type AIAction = {
-  type?: string;
-  label?: string;
-  value?: string;
-  field?: string;
+type AICard   = { label?: string; value?: any };
+type AIAction = { type?: string; label?: string; value?: string; field?: string };
+type DesignSelection = { required?: boolean; selected?: string | null; default?: string; options?: string[] };
+type RemittanceDraft = {
+  date: string;
+  customerName: string;
+  receiverName: string;
+  receiverPhone: string;
+  payoutMethod: string;
+  yenAmount: number;
+  exchangeRate: number;
+  serviceFee: number;
+  status: RemittanceStatus;
+  note: string;
+  mmkAmount: number;
 };
 
 type Msg = {
-  id: string;
-  role: "user" | "ai";
-  text: string;
-  lines?: string[];
-  streaming?: boolean;
-  done?: boolean;
-
-  cards?: AICard[];
-  actions?: AIAction[];
-
+  id: string; role: "user" | "ai"; text: string; lines?: string[];
+  streaming?: boolean; done?: boolean; cards?: AICard[]; actions?: AIAction[];
   table?: { title?: string; rows: any[]; kind?: Mode };
-  report?: any;
-  reportKind?: Mode | "mixed";
-  chart?: {
-    series?: {
-      trend?: { x: string; y: number }[];
-      byShop?: { name: string; value: number }[];
-      byCategory?: { name: string; value: number }[];
-      byBank?: { name: string; value: number }[];
-      byCompany?: { name: string; value: number }[];
+  remittance?: {
+    summary: {
+      records: number;
+      totalJpy: number;
+      totalMmk: number;
+      totalFee: number;
+      pending: number;
+      paid: number;
+      cancelled: number;
     };
-    filters?: any;
-    kind?: Mode;
+    rows: Array<{
+      date: string;
+      customerName: string;
+      receiverName: string;
+      payoutMethod: string;
+      status: RemittanceStatus;
+      yenAmount: number;
+      mmkAmount: number;
+    }>;
   };
-  image?: {
-    src: string;
-    title?: string;
-    kind?: Mode | "mixed";
-    poster?: PosterMeta | null;
+  report?: any; reportKind?: Mode | "mixed";
+  chart?: {
+    series?: { trend?: any[]; byShop?: any[]; byCategory?: any[]; byBank?: any[]; byCompany?: any[] };
+    filters?: any; kind?: Mode;
   };
+  image?: { src: string; title?: string; kind?: Mode | "mixed"; poster?: PosterMeta | null };
 };
-
 type AIResult = any;
 
-// helpers
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 function uid() {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : Math.random().toString(16).slice(2);
+    ? crypto.randomUUID() : Math.random().toString(16).slice(2);
 }
-
-function getPayload(ai: any) {
-  return ai?.payload ?? ai;
-}
-
-function getAssistant(ai: any) {
-  return ai?.assistant ?? null;
-}
+const getPayload   = (ai: any) => ai?.payload ?? ai;
+const getAssistant = (ai: any) => ai?.assistant ?? null;
 
 function toISODate(v: any): string {
   if (!v) return "";
   const raw = v?.$date ?? v;
   const d = raw instanceof Date ? raw : new Date(raw);
   if (Number.isNaN(d.getTime())) return "";
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 }
-
 function toNumber(v: any): number | null {
   if (v === null || v === undefined) return null;
   const n = Number(String(v).replace(/[^\d.-]/g, ""));
   return Number.isFinite(n) ? n : null;
 }
-
 function yen(v: any): string {
   const n = toNumber(v);
-  if (n === null) return v ? `¥${String(v)}` : "—";
-  return `¥${n.toLocaleString()}`;
+  return n === null ? (v ? `¥${String(v)}` : "—") : `¥${n.toLocaleString()}`;
 }
-
+function mmk(v: any): string {
+  const n = toNumber(v);
+  return n === null ? (v ? `${String(v)} MMK` : "—") : `${n.toLocaleString()} MMK`;
+}
 function cellText(v: any): string {
   if (v === null || v === undefined) return "—";
-  const s = String(v).trim();
-  return s ? s : "—";
+  const s = String(v).trim(); return s || "—";
 }
-
-function csvEscape(s: string) {
-  const t = s.replace(/"/g, '""');
-  return `"${t}"`;
+function csvE(s: string) { return `"${s.replace(/"/g, '""')}"`; }
+function dlUrl(url: string, fn: string) {
+  const a = Object.assign(document.createElement("a"), { href: url, download: fn });
+  document.body.appendChild(a); a.click(); a.remove();
 }
-
-function exportOutcomesCSV(rows: any[], filename = "outcomes.csv") {
-  const headers = ["date", "shop", "bank", "amount", "notice"];
-  const lines: string[] = [];
-  lines.push(headers.join(","));
-
-  for (const r of rows) {
-    const date = toISODate(r?.date) || toISODate(r?.createdAt);
-    const shop = String(r?.shop ?? "");
-    const bank = String(r?.bank ?? "");
-    const amount = String(r?.amount ?? "");
-    const notice = String(r?.notice ?? "");
-
-    lines.push(
-      [
-        csvEscape(date),
-        csvEscape(shop),
-        csvEscape(bank),
-        csvEscape(amount),
-        csvEscape(notice),
-      ].join(",")
-    );
-  }
-
-  const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
+function exportCSV(rows: any[], kind: "outcome" | "income", fn: string) {
+  const h = kind === "outcome"
+    ? ["date","shop","bank","amount","notice"]
+    : ["date","company","month","amount","notice"];
+  const lines = [h.join(","), ...rows.map(r => {
+    const date = csvE(toISODate(r?.date) || toISODate(r?.createdAt));
+    return kind === "outcome"
+      ? [date, csvE(String(r?.shop??"")), csvE(String(r?.bank??"")), csvE(String(r?.amount??"")), csvE(String(r?.notice??""))].join(",")
+      : [date, csvE(String(r?.company??r?.compamy??"")), csvE(String(r?.month??"")), csvE(String(r?.amount??"")), csvE(String(r?.notice??""))].join(",");
+  })];
+  const a = Object.assign(document.createElement("a"), {
+    href: URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" })),
+    download: fn,
+  });
+  document.body.appendChild(a); a.click(); a.remove();
 }
-
-function exportIncomesCSV(rows: any[], filename = "incomes.csv") {
-  const headers = ["date", "company", "month", "amount", "notice"];
-  const lines: string[] = [];
-  lines.push(headers.join(","));
-
-  for (const r of rows) {
-    const date = toISODate(r?.date) || toISODate(r?.createdAt);
-    const company = String(r?.company ?? r?.compamy ?? "");
-    const month = String(r?.month ?? "");
-    const amount = String(r?.amount ?? "");
-    const notice = String(r?.notice ?? "");
-
-    lines.push(
-      [
-        csvEscape(date),
-        csvEscape(company),
-        csvEscape(month),
-        csvEscape(amount),
-        csvEscape(notice),
-      ].join(",")
-    );
-  }
-
-  const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
-
 function parseItemsFromAnswer(answer: string): any[] {
-  const lines = (answer ?? "")
-    .split("\n")
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  const rows: any[] = [];
-  for (const line of lines) {
-    const m = line.match(
-      /^\d+\.\s*(.+?)\s+¥\s*([\d,]+)(?:\s+\[(.*?)\])?(?:\s+(.*))?$/i
-    );
-    if (!m) continue;
-
-    rows.push({
-      date: "",
-      shop: (m[1] ?? "").trim(),
-      amount: (m[2] ?? "").replace(/,/g, ""),
-      category: (m[3] ?? "").trim() || "-",
-      notice: (m[4] ?? "").trim() || "",
-      bank: "",
-    });
-  }
-  return rows;
+  return (answer ?? "").split("\n").map(s => s.trim()).filter(Boolean).flatMap(line => {
+    const m = line.match(/^\d+\.\s*(.+?)\s+¥\s*([\d,]+)(?:\s+\[(.*?)\])?(?:\s+(.*))?$/i);
+    return m ? [{ date: "", shop: (m[1]??"").trim(), amount: (m[2]??"").replace(/,/g,""), notice: (m[4]??"").trim()||"", bank: "" }] : [];
+  });
 }
 
 function pickLines(ai: any): string[] {
-  const assistant = getAssistant(ai);
-  const payload = getPayload(ai);
-
-  const lines =
-    (Array.isArray(assistant?.lines) ? assistant.lines : null) ??
-    (Array.isArray(payload?.answer_lines) ? payload.answer_lines : null) ??
-    (Array.isArray(ai?.answer_lines) ? ai.answer_lines : null) ??
-    [];
-
-  return Array.isArray(lines) ? lines.map(String).filter(Boolean) : [];
+  const a = getAssistant(ai), p = getPayload(ai);
+  const l = (Array.isArray(a?.lines) ? a.lines : null)
+    ?? (Array.isArray(p?.answer_lines) ? p.answer_lines : null)
+    ?? (Array.isArray(ai?.answer_lines) ? ai.answer_lines : null) ?? [];
+  return Array.isArray(l) ? l.map(String).filter(Boolean) : [];
 }
-
 function pickCards(ai: any): AICard[] {
-  const assistant = getAssistant(ai);
-  const cards = Array.isArray(assistant?.cards) ? assistant.cards : [];
-  return cards.map((c: any) => ({
-    label: typeof c?.label === "string" ? c.label : "",
-    value: c?.value,
-  }));
+  const a = getAssistant(ai);
+  return Array.isArray(a?.cards)
+    ? a.cards.map((c: any) => ({ label: typeof c?.label==="string" ? c.label : "", value: c?.value }))
+    : [];
 }
-
 function pickActions(ai: any): AIAction[] {
-  const assistant = getAssistant(ai);
-  const actions = Array.isArray(assistant?.actions) ? assistant.actions : [];
-  return actions.map((a: any) => ({
-    type: typeof a?.type === "string" ? a.type : "",
-    label: typeof a?.label === "string" ? a.label : "",
-    value: typeof a?.value === "string" ? a.value : "",
-    field: typeof a?.field === "string" ? a.field : "",
-  }));
+  const a = getAssistant(ai);
+  return Array.isArray(a?.actions)
+    ? a.actions.map((x: any) => ({
+        type:  typeof x?.type==="string"  ? x.type  : "",
+        label: typeof x?.label==="string" ? x.label : "",
+        value: typeof x?.value==="string" ? x.value : "",
+        field: typeof x?.field==="string" ? x.field : "",
+      }))
+    : [];
 }
-
 function pickAnswerText(ai: any): string {
-  const assistant = getAssistant(ai);
-  const payload = getPayload(ai);
-  return String(
-    assistant?.message ?? ai?.answer ?? payload?.answer ?? ai?.message ?? "OK"
-  );
+  const a = getAssistant(ai), p = getPayload(ai);
+  return String(a?.message ?? ai?.answer ?? p?.answer ?? ai?.message ?? "OK");
 }
-
 function pickChartSeries(ai: any) {
-  const payload = getPayload(ai);
-
-  const s =
-    payload?.series ??
-    payload?.chart?.series ??
-    ai?.series ??
-    ai?.chart?.series ??
-    null;
-
-  const series = {
-    trend: Array.isArray(s?.trend) ? s.trend : [],
-    byShop: Array.isArray(s?.byShop) ? s.byShop : [],
-    byCategory: Array.isArray(s?.byCategory) ? s.byCategory : [],
-    byBank: Array.isArray(s?.byBank) ? s.byBank : [],
-    byCompany: Array.isArray(s?.byCompany)
-      ? s.byCompany
-      : Array.isArray(s?.byShop)
-      ? s.byShop
-      : [],
-  };
-
-  const filters =
-    payload?.filters ??
-    payload?.chart?.filters ??
-    ai?.filters ??
-    ai?.chart?.filters ??
-    null;
-
-  return { series, filters };
-}
-
-function pickImage(ai: any): { src: string; title?: string } | null {
-  const payload = getPayload(ai);
-  const img = payload?.image ?? ai?.image ?? null;
-
-  const src =
-    typeof img?.data_url === "string" && img.data_url.startsWith("data:image/")
-      ? img.data_url
-      : null;
-
-  if (!src) return null;
-
+  const p = getPayload(ai);
+  const s = p?.series ?? p?.chart?.series ?? ai?.series ?? ai?.chart?.series ?? null;
   return {
-    src,
-    title: typeof img?.title === "string" ? img.title : undefined,
+    series: {
+      trend:      Array.isArray(s?.trend)      ? s.trend      : [],
+      byShop:     Array.isArray(s?.byShop)     ? s.byShop     : [],
+      byCategory: Array.isArray(s?.byCategory) ? s.byCategory : [],
+      byBank:     Array.isArray(s?.byBank)     ? s.byBank     : [],
+      byCompany:  Array.isArray(s?.byCompany)  ? s.byCompany  : (Array.isArray(s?.byShop) ? s.byShop : []),
+    },
+    filters: p?.filters ?? p?.chart?.filters ?? ai?.filters ?? ai?.chart?.filters ?? null,
   };
 }
-
+function pickImage(ai: any) {
+  const p = getPayload(ai);
+  const img = p?.image ?? ai?.image ?? null;
+  const src = typeof img?.data_url==="string" && img.data_url.startsWith("data:image/") ? img.data_url : null;
+  return src ? { src, title: typeof img?.title==="string" ? img.title : undefined } : null;
+}
 function pickPoster(ai: any): PosterMeta | null {
-  const payload = getPayload(ai);
-  const poster = payload?.poster ?? ai?.poster ?? null;
-
+  const p = getPayload(ai);
+  const poster = p?.poster ?? ai?.poster ?? null;
   if (!poster || typeof poster !== "object") return null;
-
   return {
-    size: typeof poster?.size === "string" ? poster.size : null,
-    title: typeof poster?.title === "string" ? poster.title : null,
-    subtitle: typeof poster?.subtitle === "string" ? poster.subtitle : null,
-    bullets: Array.isArray(poster?.bullets)
-      ? poster.bullets.map((x: any) => String(x))
-      : null,
-    footer: typeof poster?.footer === "string" ? poster.footer : null,
-    theme: typeof poster?.theme === "string" ? poster.theme : null,
-    style: typeof poster?.style === "string" ? poster.style : null,
+    size:     typeof poster?.size==="string"     ? poster.size     : null,
+    title:    typeof poster?.title==="string"    ? poster.title    : null,
+    subtitle: typeof poster?.subtitle==="string" ? poster.subtitle : null,
+    bullets:  Array.isArray(poster?.bullets) ? poster.bullets.map((x: any) => String(x)) : null,
+    footer:   typeof poster?.footer==="string"   ? poster.footer   : null,
+    theme:    typeof poster?.theme==="string"    ? poster.theme    : null,
+    style:    typeof poster?.style==="string"    ? poster.style    : null,
   };
 }
-
+function pickDesignSelection(ai: any): DesignSelection | null {
+  const p = getPayload(ai);
+  const s = p?.design_selection ?? ai?.design_selection ?? null;
+  if (!s || typeof s !== "object") return null;
+  return {
+    required: Boolean(s?.required),
+    selected: typeof s?.selected==="string" ? s.selected : null,
+    default:  typeof s?.default==="string"  ? s.default  : undefined,
+    options:  Array.isArray(s?.options) ? s.options.map((x: any) => String(x)) : [],
+  };
+}
 function detectKindByText(input: string): DetectKind {
   const t = (input || "").toLowerCase().trim();
-
-  const incomeHints = [
-    "income",
-    "incomes",
-    "salary",
-    "pay",
-    "wage",
-    "bonus",
-    "allowance",
-    "company",
-    "compamy",
-    "ဝင်ငွေ",
-    "လစာ",
-    "လုပ်ခ",
-    "အလုပ်လစာ",
-  ];
-
-  const outcomeHints = [
-    "outcome",
-    "outcomes",
-    "spend",
-    "expense",
-    "spent",
-    "buy",
-    "bought",
-    "shop",
-    "lawson",
-    "familymart",
-    "7-eleven",
-    "aeon",
-    "donki",
-    "don quijote",
-    "ကုန်ကျ",
-    "အသုံးစရိတ်",
-    "သုံး",
-    "ဝယ်",
-  ];
-
-  const mixedHints = [
-    "report",
-    "analysis",
-    "insight",
-    "next steps",
-    "poster",
-    "image",
-    "chart",
-    "graph",
-    "ai poster",
-    "summary",
-    "အကြံပြု",
-    "ဘာတွေလုပ်ရမလဲ",
-    "ပုံ",
-    "ပိုစတာ",
-    "ဓာတ်ပုံ",
-    "joke",
-    "motivation",
-    "quote",
-    "quiz",
-    "tip",
-    "project idea",
-    "binhlaig",
-    "ပျင်း",
-    "ဟာသ",
-  ];
-
-  const hasIncome = incomeHints.some((k) => t.includes(k));
-  const hasOutcome = outcomeHints.some((k) => t.includes(k));
-  const hasMixed = mixedHints.some((k) => t.includes(k));
-
-  if (hasIncome && !hasOutcome) return "income";
-  if (hasOutcome && !hasIncome) return "outcome";
-  if (hasMixed) return "mixed";
-
+  const iH = ["income","incomes","salary","pay","wage","bonus","company","compamy","ဝင်ငွေ","လစာ","လုပ်ခ"];
+  const oH = ["outcome","outcomes","spend","expense","spent","buy","bought","shop","lawson","familymart","ကုန်ကျ","အသုံးစရိတ်","သုံး","ဝယ်"];
+  const mH = ["report","analysis","insight","next steps","poster","image","chart","graph","summary","အကြံပြု","ဘာတွေ","ပုံ"];
+  const hI = iH.some(k => t.includes(k));
+  const hO = oH.some(k => t.includes(k));
+  const hM = mH.some(k => t.includes(k));
+  if (hI && !hO) return "income";
+  if (hO && !hI) return "outcome";
+  if (hM) return "mixed";
   return "mixed";
 }
-
 function detectKindByIntent(ai: any): Mode | "mixed" {
-  const payload = getPayload(ai);
-  const intent = String(ai?.intent ?? payload?.intent ?? "").toLowerCase();
-
-  if (!intent) return "mixed";
-  if (intent.includes("income")) return "income";
-  if (intent.includes("outcome")) return "outcome";
-  if (intent === "poster_image") return "mixed";
-  if (intent.includes("list_incomes") || intent.includes("charts_incomes"))
-    return "income";
-  if (intent.includes("list_outcomes") || intent.includes("charts_outcomes"))
-    return "outcome";
-
+  const p = getPayload(ai);
+  const i = String(ai?.intent ?? p?.intent ?? "").toLowerCase();
+  if (!i) return "mixed";
+  if (i.includes("income"))  return "income";
+  if (i.includes("outcome")) return "outcome";
+  if (i === "poster_image")  return "mixed";
   return "mixed";
 }
-
-function isFinanceIntent(ai: any): boolean {
-  const payload = getPayload(ai);
-  const intent = String(ai?.intent ?? payload?.intent ?? "").toLowerCase();
-
-  const okIntents = [
-    "create_outcome",
-    "list_outcomes",
-    "charts_outcomes",
-    "query_outcome",
-    "outcome_image",
-    "next_steps_report",
-    "create_income",
-    "list_incomes",
-    "charts_incomes",
-    "income_image",
-    "income_report",
-    "poster_image",
-  ];
-
-  return okIntents.includes(intent);
+function isRecognized(ai: any): boolean {
+  const p = getPayload(ai);
+  const i = String(ai?.intent ?? p?.intent ?? "").toLowerCase();
+  return ["create_outcome","list_outcomes","charts_outcomes","query_outcome","outcome_image",
+    "next_steps_report","create_income","list_incomes","charts_incomes","income_image",
+    "income_report","poster_image"].includes(i);
+}
+function isBadRequestLike(e: any): boolean {
+  const m = String(e?.message ?? "").toLowerCase();
+  return m.includes("400") || m.includes("bad request") || m.includes("text is required");
+}
+function isRemittanceText(input: string): boolean {
+  const t = (input || "").toLowerCase();
+  return [
+    "remittance", "money transfer", "myanmar", "japan", "jpy", "mmk",
+    "kbz", "wave", "aya", "ငွေလွှဲ", "မြန်မာ", "ဂျပန်", "လက်ခံ"
+  ].some(k => t.includes(k));
+}
+function isRemittanceCreateText(input: string): boolean {
+  const t = (input || "").toLowerCase();
+  return isRemittanceText(input) &&
+    (/\b(jpy|yen|¥)\b/i.test(t) || /\brate\b/i.test(t) || /နှုန်း/.test(t)) &&
+    (/\b(receiver|customer|sender|to)\b/i.test(t) || /လက်ခံသူ|ဂျပန်ဘက်|မြန်မာဘက်/.test(t));
 }
 
-function isFunLikeIntent(ai: any): boolean {
-  const payload = getPayload(ai);
-  const intent = String(ai?.intent ?? payload?.intent ?? "").toLowerCase();
-  return (
-    intent.includes("fun_qa") ||
-    intent.includes("learning_qa") ||
-    intent.includes("project_qa") ||
-    intent.includes("general_qa")
-  );
-}
+// ─── Inline Code regex (no backtick in regex literal) ─────────────────────────
+const INLINE_CODE_RE = new RegExp("(\u0060[^\u0060]+\u0060)", "g");
 
-function isBadRequestLike(error: any): boolean {
-  const msg = String(error?.message ?? "").toLowerCase();
-  return (
-    msg.includes("400") ||
-    msg.includes("bad request") ||
-    msg.includes("text is required") ||
-    msg.includes("invalid request") ||
-    msg.includes("unsupported")
-  );
-}
-
-// avatars
+// ─── UI Atoms ─────────────────────────────────────────────────────────────────
 function AIAvatar() {
   return (
-    <div className="mt-1 grid h-10 w-10 place-items-center rounded-2xl border bg-gradient-to-br from-primary/25 to-muted shadow-sm">
-      <Sparkles className="h-5 w-5 text-primary" />
+    <div className="mt-0.5 flex-shrink-0 w-9 h-9 rounded-xl bg-gradient-to-br from-violet-600 to-cyan-500 flex items-center justify-center shadow-lg shadow-violet-500/30 animate-pulse-slow">
+      <Bot size={17} className="text-white" />
     </div>
   );
 }
-
 function UserAvatar() {
   return (
-    <div className="mt-1 grid h-10 w-10 place-items-center rounded-2xl border bg-muted/40 shadow-sm">
-      <span className="text-xs font-semibold text-muted-foreground">You</span>
+    <div className="mt-0.5 flex-shrink-0 w-9 h-9 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center">
+      <span className="text-[9px] font-black tracking-widest text-slate-400 dark:text-slate-500">YOU</span>
     </div>
   );
 }
 
-// pretty lines
-function InlineCodeText({ text }: { text: string }) {
-  const parts = String(text).split(/(`[^`]+`)/g);
-
+function IC({ text }: { text: string }) {
+  const parts = String(text).split(INLINE_CODE_RE);
   return (
     <>
       {parts.map((p, i) => {
-        const isCode = p.startsWith("`") && p.endsWith("`");
-        if (!isCode) return <span key={i}>{p}</span>;
-        const code = p.slice(1, -1);
-        return (
-          <code
-            key={i}
-            className="mx-1 rounded-md border bg-background px-2 py-0.5 font-mono text-xs text-foreground"
-          >
-            {code}
-          </code>
-        );
+        const isCode = p.charAt(0) === "`" && p.charAt(p.length - 1) === "`" && p.length > 1;
+        return isCode
+          ? <code key={i} className="mx-0.5 px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono text-xs text-violet-600 dark:text-cyan-400">{p.slice(1,-1)}</code>
+          : <span key={i}>{p}</span>;
       })}
     </>
   );
 }
 
-function DraftingBadge({ done }: { done?: boolean }) {
+function DraftBadge({ done }: { done?: boolean }) {
   return (
-    <div
-      className={[
-        "inline-flex items-center gap-1 rounded-full border bg-background px-2 py-0.5 text-[11px]",
-        done
-          ? "text-emerald-600 dark:text-emerald-400"
-          : "text-muted-foreground",
-      ].join(" ")}
-    >
-      {done ? (
-        <>
-          <CheckCircle2 className="h-3.5 w-3.5" />
-          <span>Saved</span>
-        </>
-      ) : (
-        <>
-          <Sparkles className="h-3.5 w-3.5" />
-          <span>Drafting…</span>
-        </>
-      )}
-    </div>
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+      done
+        ? "border-emerald-400/40 text-emerald-500 bg-emerald-500/10"
+        : "border-slate-300 dark:border-slate-700 text-slate-400 dark:text-slate-500 bg-slate-50 dark:bg-slate-800/50"
+    }`}>
+      {done ? <><CheckCircle2 size={10} />Saved</> : <><Zap size={10} />Drafting…</>}
+    </span>
   );
 }
 
-function DonePop() {
-  return (
-    <div className="pointer-events-none absolute right-3 top-3 animate-[pop_650ms_ease-out_1]">
-      <div className="flex items-center gap-1 rounded-full border bg-background px-2 py-1 text-xs text-emerald-600 dark:text-emerald-400 shadow-sm">
-        <CheckCircle2 className="h-4 w-4" />
-        Done
-      </div>
-    </div>
-  );
-}
-
-function PrettyLinesBubble({
-  lines,
-  streaming,
-  done,
-}: {
-  lines: string[];
-  streaming?: boolean;
-  done?: boolean;
-}) {
-  const safeLines = Array.isArray(lines) ? lines : [];
-
-  if (!safeLines?.length) {
+function LinesBubble({ lines, streaming, done }: { lines: string[]; streaming?: boolean; done?: boolean }) {
+  const safe = Array.isArray(lines) ? lines : [];
+  if (!safe.length) {
     return (
-      <div className="relative rounded-3xl border bg-muted/50 px-4 py-3 text-sm leading-6 shadow-sm">
+      <div className="rounded-2xl rounded-tl-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 px-4 py-3 shadow-sm">
         <div className="flex items-center justify-between">
-          <div className="text-base font-semibold">AI</div>
-          <DraftingBadge done={false} />
+          <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">AI</span>
+          <DraftBadge done={false} />
         </div>
-        <div className="mt-2 text-muted-foreground">
-          Writing…
-          <span className="ml-1 inline-block w-2 animate-pulse">▍</span>
+        <div className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+          Writing<span className="inline-block w-0.5 h-3.5 ml-0.5 align-middle bg-violet-500 rounded-sm animate-pulse" />
         </div>
       </div>
     );
   }
-
-  const head = safeLines[0] ?? "";
-  const rest = safeLines.slice(1);
+  const head = safe[0] ?? "";
+  const rest = safe.slice(1);
   const isBullet = (s: string) => /^\s*[•\-*]\s+/.test(s);
-
   return (
-    <div className="relative rounded-3xl border bg-muted/50 px-4 py-3 text-sm leading-6 shadow-sm">
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-base font-semibold">
-          <InlineCodeText text={head} />
+    <div className="relative rounded-2xl rounded-tl-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 px-4 py-3 shadow-sm overflow-hidden">
+      {/* top accent line */}
+      <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-violet-500 via-cyan-400 to-transparent opacity-60" />
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1 text-left text-sm font-semibold text-slate-800 dark:text-slate-100 leading-6 whitespace-pre-wrap break-words">
+          <IC text={head} />
         </div>
-
-        <div className="flex items-center gap-2">
-          <DraftingBadge done={done} />
-          {streaming ? (
-            <span className="inline-block w-2 animate-pulse text-muted-foreground">
-              ▍
-            </span>
-          ) : null}
+        <div className="flex items-center gap-1.5 flex-shrink-0 pt-0.5">
+          <DraftBadge done={done} />
+          {streaming && <span className="inline-block w-0.5 h-3.5 bg-violet-500 rounded-sm animate-pulse" />}
         </div>
       </div>
-
-      {!streaming && done ? <DonePop /> : null}
-
-      {rest.length > 0 ? (
-        <div className="mt-2 space-y-2">
+      {rest.length > 0 && (
+        <div className="mt-2 space-y-1.5 text-sm text-slate-500 dark:text-slate-400 leading-6 whitespace-pre-wrap break-words">
           {rest.map((line, idx) => {
             const bullet = isBullet(line);
             const clean = bullet ? line.replace(/^\s*[•\-*]\s+/, "") : line;
-
-            return (
-              <div key={idx} className={bullet ? "flex gap-2" : ""}>
-                {bullet ? <span className="mt-[2px]">•</span> : null}
-                <div className="text-muted-foreground">
-                  <InlineCodeText text={clean} />
-                </div>
-              </div>
-            );
+            return bullet
+              ? <div key={idx} className="flex items-start gap-2"><span className="text-violet-500 mt-1 text-xs flex-shrink-0">◆</span><span className="min-w-0 flex-1"><IC text={clean} /></span></div>
+              : <div key={idx}><IC text={line} /></div>;
           })}
         </div>
-      ) : null}
+      )}
     </div>
   );
 }
 
 function CardsRow({ cards }: { cards: AICard[] }) {
   if (!cards?.length) return null;
-
   return (
-    <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+    <div className="mt-3 grid gap-2 grid-cols-2 sm:grid-cols-3">
       {cards.map((c, i) => (
-        <div
-          key={`${c.label}-${i}`}
-          className="rounded-2xl border bg-background px-3 py-3 shadow-sm"
-        >
-          <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            {c.label || "Info"}
-          </div>
-          <div className="mt-1 text-sm font-semibold break-words">
-            {String(c.value ?? "—")}
-          </div>
+        <div key={`${c.label}-${i}`} className="rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3 shadow-sm hover:border-violet-400/50 transition-colors">
+          <div className="text-[9px] font-black uppercase tracking-widest text-violet-500 dark:text-violet-400 mb-1">{c.label || "Info"}</div>
+          <div className="text-sm font-bold text-slate-800 dark:text-slate-100 break-all">{String(c.value ?? "—")}</div>
         </div>
       ))}
     </div>
   );
 }
 
-// outcome table
-function OutcomesTableCard({ title, rows }: { title: string; rows: any[] }) {
-  const [bankFilter, setBankFilter] = useState<string>("ALL");
-  const [page, setPage] = useState(1);
+// ─── Table ────────────────────────────────────────────────────────────────────
+function TableCard({ title, rows, kind }: { title: string; rows: any[]; kind: Mode }) {
+  const isIn = kind === "income";
+  const [filter, setFilter]   = useState("ALL");
+  const [page, setPage]       = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
-  const banks = useMemo(() => {
-    return Array.from(
-      new Set(rows.map((r) => String(r?.bank ?? "").trim()).filter(Boolean))
-    ).sort((a, b) => a.localeCompare(b));
-  }, [rows]);
+  const keys = useMemo(() =>
+    Array.from(new Set(
+      rows.map(r => String(isIn ? (r?.company ?? r?.compamy ?? "") : (r?.bank ?? "")).trim()).filter(Boolean)
+    )).sort(), [rows, isIn]);
 
-  const filtered = useMemo(() => {
-    if (bankFilter === "ALL") return rows;
-    return rows.filter((r) => String(r?.bank ?? "").trim() === bankFilter);
-  }, [rows, bankFilter]);
+  const filtered = useMemo(() =>
+    filter === "ALL" ? rows : rows.filter(r =>
+      String(isIn ? (r?.company ?? r?.compamy ?? "") : (r?.bank ?? "")).trim() === filter
+    ), [rows, filter, isIn]);
 
-  const totalRows = filtered.length;
-  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
-  const safePage = Math.min(Math.max(1, page), totalPages);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const safePage   = Math.min(Math.max(1, page), totalPages);
+  useEffect(() => { setPage(1); }, [filter, pageSize]);
 
-  useEffect(() => {
-    if (page !== safePage) setPage(safePage);
-  }, [page, safePage]);
+  const paged    = useMemo(() => filtered.slice((safePage-1)*pageSize, safePage*pageSize), [filtered, safePage, pageSize]);
+  const totalAmt = useMemo(() => filtered.reduce((s, r) => s + (toNumber(r?.amount) ?? 0), 0), [filtered]);
+  const from     = filtered.length === 0 ? 0 : (safePage-1)*pageSize+1;
+  const to       = Math.min(safePage*pageSize, filtered.length);
 
-  useEffect(() => {
-    setPage(1);
-  }, [bankFilter, pageSize]);
-
-  const pagedRows = useMemo(() => {
-    const start = (safePage - 1) * pageSize;
-    return filtered.slice(start, start + pageSize);
-  }, [filtered, safePage, pageSize]);
-
-  const totalAmount = useMemo(() => {
-    return filtered.reduce((sum, r) => sum + (toNumber(r?.amount) ?? 0), 0);
-  }, [filtered]);
-
-  const fromIdx = totalRows === 0 ? 0 : (safePage - 1) * pageSize + 1;
-  const toIdx = Math.min(safePage * pageSize, totalRows);
+  const selectCls = "h-8 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs px-2 outline-none focus:ring-1 focus:ring-violet-500";
 
   return (
-    <div className="mt-3 overflow-hidden rounded-3xl border bg-background shadow-sm">
-      <div className="flex flex-col gap-2 border-b bg-muted/30 px-4 py-3">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-3">
-            <div className="text-sm font-semibold">Outcomes</div>
-            <div className="text-xs text-muted-foreground">{title}</div>
+    <div className="mt-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
+      {/* header */}
+      <div className="border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/80 px-4 py-3 space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-black uppercase tracking-widest text-violet-500">{isIn ? "Incomes" : "Outcomes"}</span>
+            <span className="text-xs text-slate-400">{title}</span>
           </div>
-
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">Bank</span>
-              <select
-                className="h-8 rounded-md border bg-background px-2 text-sm"
-                value={bankFilter}
-                onChange={(e) => setBankFilter(e.target.value)}
-              >
-                <option value="ALL">All</option>
-                {banks.map((b) => (
-                  <option key={b} value={b}>
-                    {b}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">Rows</span>
-              <select
-                className="h-8 rounded-md border bg-background px-2 text-sm"
-                value={pageSize}
-                onChange={(e) => setPageSize(Number(e.target.value))}
-              >
-                <option value={10}>10</option>
-                <option value={25}>25</option>
-                <option value={50}>50</option>
-              </select>
-            </div>
-
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => exportOutcomesCSV(filtered, "outcomes.csv")}
-            >
-              Export CSV
-            </Button>
+            <span className="text-xs text-slate-400">{isIn ? "Company" : "Bank"}</span>
+            <select className={selectCls} value={filter} onChange={e => setFilter(e.target.value)}>
+              <option value="ALL">All</option>
+              {keys.map(k => <option key={k} value={k}>{k}</option>)}
+            </select>
+            <span className="text-xs text-slate-400">Rows</span>
+            <select className={selectCls} value={pageSize} onChange={e => setPageSize(Number(e.target.value))} style={{ width: 60 }}>
+              {[10,25,50].map(n => <option key={n} value={n}>{n}</option>)}
+            </select>
+            <button
+              onClick={() => exportCSV(filtered, kind, `${kind}s.csv`)}
+              className="h-8 px-3 rounded-lg text-xs font-semibold border border-violet-300 dark:border-violet-700 text-violet-600 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/30 transition-colors"
+            >CSV ↓</button>
           </div>
         </div>
-
-        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={safePage <= 1}
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-
-          <span className="tabular-nums">
-            Page {safePage} / {totalPages}
-          </span>
-
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={safePage >= totalPages}
-          >
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-
-          <span className="tabular-nums">
-            Showing {fromIdx}–{toIdx} of {totalRows}
-          </span>
-
-          <span className="tabular-nums">
-            Total: ¥{totalAmount.toLocaleString()}
+        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+          <button
+            onClick={() => setPage(p => Math.max(1, p-1))} disabled={safePage <= 1}
+            className="w-7 h-7 rounded-lg border border-slate-200 dark:border-slate-700 flex items-center justify-center hover:border-violet-400 disabled:opacity-30 transition-colors"
+          ><ChevronLeft size={13} /></button>
+          <span className="font-mono">{safePage}/{totalPages}</span>
+          <button
+            onClick={() => setPage(p => Math.min(totalPages, p+1))} disabled={safePage >= totalPages}
+            className="w-7 h-7 rounded-lg border border-slate-200 dark:border-slate-700 flex items-center justify-center hover:border-violet-400 disabled:opacity-30 transition-colors"
+          ><ChevronRight size={13} /></button>
+          <span className="font-mono">{from}–{to} of {filtered.length}</span>
+          <span className="ml-auto font-mono font-semibold text-cyan-500 bg-cyan-50 dark:bg-cyan-900/20 border border-cyan-200 dark:border-cyan-800 px-2 py-0.5 rounded-full">
+            ¥{totalAmt.toLocaleString()}
           </span>
         </div>
       </div>
-
-      <div className="max-h-[520px] overflow-auto">
-        <Table>
-          <TableHeader className="sticky top-0 z-10 bg-background">
-            <TableRow className="bg-background">
-              <TableHead className="whitespace-nowrap">Date</TableHead>
-              <TableHead className="whitespace-nowrap">Shop</TableHead>
-              <TableHead className="whitespace-nowrap">Bank</TableHead>
-              <TableHead className="whitespace-nowrap text-right">
-                Amount
-              </TableHead>
-              <TableHead className="whitespace-nowrap">Notice</TableHead>
-            </TableRow>
-          </TableHeader>
-
-          <TableBody>
-            {pagedRows.length === 0 ? (
-              <TableRow>
-                <TableCell
-                  colSpan={5}
-                  className="py-10 text-center text-sm text-muted-foreground"
-                >
-                  No data
-                </TableCell>
-              </TableRow>
-            ) : (
-              pagedRows.map((r: any, idx: number) => {
-                const date = toISODate(r?.date) || toISODate(r?.createdAt);
-                const shop = cellText(r?.shop);
-                const bank = cellText(r?.bank);
-                const amountNum = toNumber(r?.amount);
-                const notice = cellText(r?.notice);
-
-                const amountCls =
-                  amountNum === null
-                    ? "text-muted-foreground"
-                    : amountNum > 0
-                    ? "text-emerald-600 dark:text-emerald-400"
-                    : amountNum < 0
-                    ? "text-red-600 dark:text-red-400"
-                    : "text-muted-foreground";
-
-                return (
-                  <TableRow
-                    key={r?._id?.$oid ?? r?._id ?? `${safePage}-${idx}`}
-                    className={[
-                      "hover:bg-muted/30",
-                      idx % 2 === 0 ? "bg-background" : "bg-muted/10",
-                    ].join(" ")}
-                  >
-                    <TableCell className="whitespace-nowrap text-xs text-muted-foreground tabular-nums">
-                      {date || "—"}
-                    </TableCell>
-
-                    <TableCell className="max-w-[220px]">
-                      <span className="inline-flex items-center rounded-full border bg-background px-2 py-1 text-xs">
-                        {shop}
-                      </span>
-                    </TableCell>
-
-                    <TableCell className="max-w-[220px]">
-                      <span className="inline-flex items-center rounded-full border bg-background px-2 py-1 text-xs">
-                        {bank}
-                      </span>
-                    </TableCell>
-
-                    <TableCell
-                      className={[
-                        "whitespace-nowrap text-right font-semibold tabular-nums",
-                        amountCls,
-                      ].join(" ")}
-                    >
-                      {yen(r?.amount)}
-                    </TableCell>
-
-                    <TableCell className="max-w-[360px] text-sm text-muted-foreground">
-                      {notice}
-                    </TableCell>
-                  </TableRow>
-                );
-              })
-            )}
-          </TableBody>
-        </Table>
+      {/* table */}
+      <div className="overflow-auto max-h-[420px]">
+        <table className="w-full border-collapse">
+          <thead>
+            <tr className="sticky top-0 bg-white dark:bg-slate-900 z-10">
+              {["Date", isIn ? "Company" : "Shop", isIn ? "Month" : "Bank", "Amount", "Notice"].map(h => (
+                <th key={h} className="px-3 py-2.5 text-left text-[10px] font-black uppercase tracking-widest text-violet-500 border-b border-slate-100 dark:border-slate-800 whitespace-nowrap">
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {paged.length === 0
+              ? <tr><td colSpan={5} className="text-center py-10 text-sm text-slate-400">No data</td></tr>
+              : paged.map((r: any, idx: number) => {
+                  const date = toISODate(r?.date) || toISODate(r?.createdAt);
+                  const n    = toNumber(r?.amount);
+                  const amtCls = n === null
+                    ? "text-slate-400 font-mono"
+                    : n > 0
+                      ? "text-emerald-500 font-bold font-mono"
+                      : "text-rose-500 font-bold font-mono";
+                  return (
+                    <tr key={r?._id?.$oid ?? r?._id ?? `${safePage}-${idx}`}
+                        className="border-b border-slate-50 dark:border-slate-800/60 hover:bg-violet-50/50 dark:hover:bg-violet-900/10 transition-colors">
+                      <td className="px-3 py-2 text-xs font-mono text-slate-400 whitespace-nowrap">{date || "—"}</td>
+                      <td className="px-3 py-2">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                          {cellText(isIn ? (r?.company ?? r?.compamy) : r?.shop)}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2">
+                        {isIn
+                          ? <span className="text-xs font-mono text-slate-400">{cellText(r?.month)}</span>
+                          : <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300">{cellText(r?.bank)}</span>}
+                      </td>
+                      <td className={`px-3 py-2 text-right whitespace-nowrap text-sm ${amtCls}`}>{yen(r?.amount)}</td>
+                      <td className="px-3 py-2 text-xs text-slate-400 max-w-[280px]">{cellText(r?.notice)}</td>
+                    </tr>
+                  );
+                })}
+          </tbody>
+        </table>
       </div>
     </div>
   );
 }
 
-// income table
-function IncomesTableCard({ title, rows }: { title: string; rows: any[] }) {
-  const [companyFilter, setCompanyFilter] = useState<string>("ALL");
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
-
-  const companies = useMemo(() => {
-    return Array.from(
-      new Set(
-        rows
-          .map((r) => String(r?.company ?? r?.compamy ?? "").trim())
-          .filter(Boolean)
-      )
-    ).sort((a, b) => a.localeCompare(b));
-  }, [rows]);
-
-  const filtered = useMemo(() => {
-    if (companyFilter === "ALL") return rows;
-    return rows.filter(
-      (r) => String(r?.company ?? r?.compamy ?? "").trim() === companyFilter
-    );
-  }, [rows, companyFilter]);
-
-  const totalRows = filtered.length;
-  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
-  const safePage = Math.min(Math.max(1, page), totalPages);
-
-  useEffect(() => {
-    if (page !== safePage) setPage(safePage);
-  }, [page, safePage]);
-
-  useEffect(() => {
-    setPage(1);
-  }, [companyFilter, pageSize]);
-
-  const pagedRows = useMemo(() => {
-    const start = (safePage - 1) * pageSize;
-    return filtered.slice(start, start + pageSize);
-  }, [filtered, safePage, pageSize]);
-
-  const totalAmount = useMemo(() => {
-    return filtered.reduce((sum, r) => sum + (toNumber(r?.amount) ?? 0), 0);
-  }, [filtered]);
-
-  const fromIdx = totalRows === 0 ? 0 : (safePage - 1) * pageSize + 1;
-  const toIdx = Math.min(safePage * pageSize, totalRows);
-
+function RemittanceCard({ data }: { data: NonNullable<Msg["remittance"]> }) {
   return (
-    <div className="mt-3 overflow-hidden rounded-3xl border bg-background shadow-sm">
-      <div className="flex flex-col gap-2 border-b bg-muted/30 px-4 py-3">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-3">
-            <div className="text-sm font-semibold">Incomes</div>
-            <div className="text-xs text-muted-foreground">{title}</div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">Company</span>
-              <select
-                className="h-8 rounded-md border bg-background px-2 text-sm"
-                value={companyFilter}
-                onChange={(e) => setCompanyFilter(e.target.value)}
-              >
-                <option value="ALL">All</option>
-                {companies.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
+    <div className="mt-3 overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+      <div className="border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/80 px-4 py-3">
+        <div className="text-[10px] font-black uppercase tracking-widest text-cyan-500">
+          Remittance Output
+        </div>
+        <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
+          <div className="rounded-xl bg-white dark:bg-slate-950/60 p-2 border border-slate-100 dark:border-slate-800">
+            <div className="text-slate-400">Records</div>
+            <div className="font-black text-slate-800 dark:text-slate-100">
+              {data.summary.records}
             </div>
-
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">Rows</span>
-              <select
-                className="h-8 rounded-md border bg-background px-2 text-sm"
-                value={pageSize}
-                onChange={(e) => setPageSize(Number(e.target.value))}
-              >
-                <option value={10}>10</option>
-                <option value={25}>25</option>
-                <option value={50}>50</option>
-              </select>
+          </div>
+          <div className="rounded-xl bg-white dark:bg-slate-950/60 p-2 border border-slate-100 dark:border-slate-800">
+            <div className="text-slate-400">JPY</div>
+            <div className="font-black text-slate-800 dark:text-slate-100">
+              {yen(data.summary.totalJpy)}
             </div>
-
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => exportIncomesCSV(filtered, "incomes.csv")}
-            >
-              Export CSV
-            </Button>
+          </div>
+          <div className="rounded-xl bg-white dark:bg-slate-950/60 p-2 border border-slate-100 dark:border-slate-800">
+            <div className="text-slate-400">MMK</div>
+            <div className="font-black text-slate-800 dark:text-slate-100">
+              {mmk(data.summary.totalMmk)}
+            </div>
           </div>
         </div>
+      </div>
 
-        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={safePage <= 1}
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-
-          <span className="tabular-nums">
-            Page {safePage} / {totalPages}
-          </span>
-
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={safePage >= totalPages}
-          >
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-
-          <span className="tabular-nums">
-            Showing {fromIdx}–{toIdx} of {totalRows}
-          </span>
-
-          <span className="tabular-nums">
-            Total: ¥{totalAmount.toLocaleString()}
-          </span>
+      {data.rows.length > 0 && (
+        <div className="divide-y divide-slate-100 dark:divide-slate-800">
+          {data.rows.map((r, i) => (
+            <div key={`${r.date}-${r.customerName}-${i}`} className="px-4 py-3 text-xs">
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                <span className="font-bold text-slate-700 dark:text-slate-200">
+                  {r.date} · {r.customerName} → {r.receiverName}
+                </span>
+                <span className="text-slate-400">
+                  {r.payoutMethod} · {r.status} · {yen(r.yenAmount)} · {mmk(r.mmkAmount)}
+                </span>
+              </div>
+            </div>
+          ))}
         </div>
-      </div>
-
-      <div className="max-h-[520px] overflow-auto">
-        <Table>
-          <TableHeader className="sticky top-0 z-10 bg-background">
-            <TableRow className="bg-background">
-              <TableHead className="whitespace-nowrap">Date</TableHead>
-              <TableHead className="whitespace-nowrap">Company</TableHead>
-              <TableHead className="whitespace-nowrap">Month</TableHead>
-              <TableHead className="whitespace-nowrap text-right">
-                Amount
-              </TableHead>
-              <TableHead className="whitespace-nowrap">Notice</TableHead>
-            </TableRow>
-          </TableHeader>
-
-          <TableBody>
-            {pagedRows.length === 0 ? (
-              <TableRow>
-                <TableCell
-                  colSpan={5}
-                  className="py-10 text-center text-sm text-muted-foreground"
-                >
-                  No data
-                </TableCell>
-              </TableRow>
-            ) : (
-              pagedRows.map((r: any, idx: number) => {
-                const date = toISODate(r?.date) || toISODate(r?.createdAt);
-                const company = cellText(r?.company ?? r?.compamy);
-                const month = cellText(r?.month);
-                const amountNum = toNumber(r?.amount);
-                const notice = cellText(r?.notice);
-
-                const amountCls =
-                  amountNum === null
-                    ? "text-muted-foreground"
-                    : amountNum > 0
-                    ? "text-emerald-600 dark:text-emerald-400"
-                    : amountNum < 0
-                    ? "text-red-600 dark:text-red-400"
-                    : "text-muted-foreground";
-
-                return (
-                  <TableRow
-                    key={r?._id?.$oid ?? r?._id ?? `${safePage}-${idx}`}
-                    className={[
-                      "hover:bg-muted/30",
-                      idx % 2 === 0 ? "bg-background" : "bg-muted/10",
-                    ].join(" ")}
-                  >
-                    <TableCell className="whitespace-nowrap text-xs text-muted-foreground tabular-nums">
-                      {date || "—"}
-                    </TableCell>
-
-                    <TableCell className="max-w-[260px]">
-                      <span className="inline-flex items-center rounded-full border bg-background px-2 py-1 text-xs">
-                        {company}
-                      </span>
-                    </TableCell>
-
-                    <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
-                      {month}
-                    </TableCell>
-
-                    <TableCell
-                      className={[
-                        "whitespace-nowrap text-right font-semibold tabular-nums",
-                        amountCls,
-                      ].join(" ")}
-                    >
-                      {yen(r?.amount)}
-                    </TableCell>
-
-                    <TableCell className="max-w-[360px] text-sm text-muted-foreground">
-                      {notice}
-                    </TableCell>
-                  </TableRow>
-                );
-              })
-            )}
-          </TableBody>
-        </Table>
-      </div>
+      )}
     </div>
   );
 }
 
-// chart UI
-function ChartCard({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="mt-3 overflow-hidden rounded-3xl border bg-background shadow-sm">
-      <div className="border-b bg-muted/30 px-4 py-3">
-        <div className="text-sm font-semibold">{title}</div>
-        <div className="mt-1 text-xs text-muted-foreground">
-          Trend / Breakdown ကိုပြထားပါတယ် ✅
-        </div>
-      </div>
-      <div className="p-4">{children}</div>
-    </div>
-  );
-}
-
-function OutcomeChartsCard({
-  series,
-}: {
-  series: {
-    trend?: { x: string; y: number }[];
-    byShop?: { name: string; value: number }[];
-    byCategory?: { name: string; value: number }[];
-    byBank?: { name: string; value: number }[];
-  };
-}) {
-  const trend = Array.isArray(series?.trend) ? series.trend : [];
-  const byShop = Array.isArray(series?.byShop) ? series.byShop : [];
-  const byCategory = Array.isArray(series?.byCategory) ? series.byCategory : [];
-  const byBank = Array.isArray(series?.byBank) ? series.byBank : [];
-
-  const totalTrend = trend.reduce((s, p) => s + (Number(p?.y) || 0), 0);
-
-  return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        <span className="rounded-full border bg-background px-2 py-1">
-          Points: <span className="tabular-nums">{trend.length}</span>
-        </span>
-        <span className="rounded-full border bg-background px-2 py-1">
-          Total(trend):{" "}
-          <span className="tabular-nums">¥{totalTrend.toLocaleString()}</span>
-        </span>
-      </div>
-
-      <div className="rounded-3xl border bg-background p-3">
-        <div className="mb-2 text-xs font-semibold text-muted-foreground">
-          Trend (Day/Month)
-        </div>
-
-        <div className="h-[420px]">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={trend}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="x" hide />
-              <YAxis />
-              <Tooltip />
-              <Line type="monotone" dataKey="y" dot={false} />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      <div className="grid gap-3 lg:grid-cols-3">
-        <div className="rounded-3xl border bg-background p-3">
-          <div className="mb-2 text-xs font-semibold text-muted-foreground">
-            Top Shops
-          </div>
-          <div className="h-[320px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={byShop}>
-                <defs>
-                  <linearGradient id="shopGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#22c55e" stopOpacity={0.9} />
-                    <stop offset="95%" stopColor="#06b6d4" stopOpacity={0.9} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis dataKey="name" hide />
-                <YAxis tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
-                <Tooltip
-                  cursor={{ fill: "rgba(0,0,0,0.05)" }}
-                  contentStyle={{
-                    borderRadius: "12px",
-                    border: "1px solid #e5e7eb",
-                    background: "#fff",
-                  }}
-                />
-                <Bar
-                  dataKey="value"
-                  radius={[10, 10, 0, 0]}
-                  fill="url(#shopGradient)"
-                />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        <div className="rounded-3xl border bg-background p-3">
-          <div className="mb-2 text-xs font-semibold text-muted-foreground">
-            Top Categories
-          </div>
-          <div className="h-[320px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={byCategory}>
-                <defs>
-                  <linearGradient
-                    id="categoryGradient"
-                    x1="0"
-                    y1="0"
-                    x2="0"
-                    y2="1"
-                  >
-                    <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.9} />
-                    <stop offset="95%" stopColor="#ef4444" stopOpacity={0.9} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis dataKey="name" hide />
-                <YAxis tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
-                <Tooltip
-                  cursor={{ fill: "rgba(0,0,0,0.05)" }}
-                  contentStyle={{
-                    borderRadius: "12px",
-                    border: "1px solid #e5e7eb",
-                    background: "#fff",
-                  }}
-                />
-                <Bar
-                  dataKey="value"
-                  radius={[10, 10, 0, 0]}
-                  fill="url(#categoryGradient)"
-                />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        <div className="rounded-3xl border bg-background p-3">
-          <div className="mb-2 text-xs font-semibold text-muted-foreground">
-            Bank Breakdown
-          </div>
-          <div className="h-[320px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={byBank}>
-                <defs>
-                  <linearGradient id="bankGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.9} />
-                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0.9} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis dataKey="name" hide />
-                <YAxis tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
-                <Tooltip
-                  cursor={{ fill: "rgba(0,0,0,0.05)" }}
-                  contentStyle={{
-                    borderRadius: "12px",
-                    border: "1px solid #e5e7eb",
-                    background: "#fff",
-                  }}
-                />
-                <Bar
-                  dataKey="value"
-                  radius={[10, 10, 0, 0]}
-                  fill="url(#bankGradient)"
-                />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function IncomeChartsCard({
-  series,
-}: {
-  series: {
-    trend?: { x: string; y: number }[];
-    byCompany?: { name: string; value: number }[];
-  };
-}) {
-  const trend = Array.isArray(series?.trend) ? series.trend : [];
+// ─── Charts ───────────────────────────────────────────────────────────────────
+function IncomeChartsCard({ series }: { series: { trend?: any[]; byCompany?: any[] } }) {
+  const trend    = Array.isArray(series?.trend)      ? series.trend      : [];
   const byCompany = Array.isArray(series?.byCompany) ? series.byCompany : [];
-  const totalTrend = trend.reduce((s, p) => s + (Number(p?.y) || 0), 0);
-
+  const total    = trend.reduce((s, p) => s + (Number(p?.y) || 0), 0);
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        <span className="rounded-full border bg-background px-2 py-1">
-          Points: <span className="tabular-nums">{trend.length}</span>
-        </span>
-        <span className="rounded-full border bg-background px-2 py-1">
-          Total(trend):{" "}
-          <span className="tabular-nums">¥{totalTrend.toLocaleString()}</span>
-        </span>
+      <div className="flex gap-2 flex-wrap">
+        <span className="text-xs font-mono font-semibold text-cyan-500 bg-cyan-50 dark:bg-cyan-900/20 border border-cyan-200 dark:border-cyan-800 px-2 py-0.5 rounded-full">Points: {trend.length}</span>
+        <span className="text-xs font-mono font-semibold text-cyan-500 bg-cyan-50 dark:bg-cyan-900/20 border border-cyan-200 dark:border-cyan-800 px-2 py-0.5 rounded-full">¥{total.toLocaleString()}</span>
       </div>
-
-      <div className="rounded-3xl border bg-background p-3">
-        <div className="mb-2 text-xs font-semibold text-muted-foreground">
-          Trend (Day/Month)
-        </div>
-
-        <div className="h-[420px]">
+      <div className="rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800 p-3">
+        <div className="text-[10px] font-black uppercase tracking-widest text-violet-500 mb-2">Income Trend</div>
+        <div style={{ height: 280 }}>
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={trend}>
-              <CartesianGrid strokeDasharray="3 3" />
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" />
               <XAxis dataKey="x" hide />
-              <YAxis />
-              <Tooltip />
-              <Line type="monotone" dataKey="y" dot={false} />
+              <YAxis tick={{ fill: "#94a3b8", fontSize: 10 }} stroke="transparent" />
+              <Tooltip contentStyle={{ background: "#1e293b", border: "1px solid #7c3aed", borderRadius: 10, color: "#e2e8f0", fontSize: 12 }} cursor={{ stroke: "#7c3aed", strokeWidth: 1 }} />
+              <Line type="monotone" dataKey="y" stroke="#7c3aed" strokeWidth={2.5} dot={false} />
             </LineChart>
           </ResponsiveContainer>
         </div>
       </div>
-
-      <div className="rounded-3xl border bg-background p-3">
-        <div className="mb-2 text-xs font-semibold text-muted-foreground">
-          Top Companies
-        </div>
-        <div className="h-[320px]">
+      <div className="rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800 p-3">
+        <div className="text-[10px] font-black uppercase tracking-widest text-violet-500 mb-2">By Company</div>
+        <div style={{ height: 220 }}>
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={byCompany}>
               <defs>
-                <linearGradient id="colorBar" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#6366f1" stopOpacity={0.9} />
-                  <stop offset="95%" stopColor="#22c55e" stopOpacity={0.9} />
+                <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#7c3aed" stopOpacity={0.95} />
+                  <stop offset="100%" stopColor="#06b6d4" stopOpacity={0.85} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" />
               <XAxis dataKey="name" hide />
-              <YAxis />
-              <Tooltip
-                cursor={{ fill: "rgba(0,0,0,0.05)" }}
-                contentStyle={{
-                  borderRadius: "12px",
-                  border: "1px solid #e5e7eb",
-                  background: "#fff",
-                }}
-              />
-              <Bar
-                dataKey="value"
-                radius={[10, 10, 0, 0]}
-                fill="url(#colorBar)"
-              />
+              <YAxis tick={{ fill: "#94a3b8", fontSize: 10 }} stroke="transparent" />
+              <Tooltip contentStyle={{ background: "#1e293b", border: "1px solid #7c3aed", borderRadius: 10, color: "#e2e8f0", fontSize: 12 }} cursor={{ fill: "rgba(124,58,237,0.08)" }} />
+              <Bar dataKey="value" radius={[6,6,0,0]} fill="url(#barGrad)" />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -1348,4054 +578,902 @@ function IncomeChartsCard({
   );
 }
 
-// report UI
-function MiniKVTable({
-  title,
-  rows,
-}: {
-  title: string;
-  rows: { k: string; v: any }[];
-}) {
+// ─── Report ───────────────────────────────────────────────────────────────────
+function ReportCard({ report, title }: { report: any; title?: string }) {
+  const stats  = report?.stats ?? {};
+  const steps: string[] = Array.isArray(report?.next_steps) ? report.next_steps : [];
+  const summary = String(report?.summary ?? "Report");
   return (
-    <div className="overflow-hidden rounded-3xl border bg-background">
-      <div className="border-b bg-muted/30 px-4 py-2 text-sm font-semibold">
-        {title}
+    <div className="mt-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
+      <div className="border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/80 px-4 py-3">
+        <div className="text-[10px] font-black uppercase tracking-widest text-violet-500">{title ?? "Report"}</div>
+        <div className="text-xs text-slate-400 mt-0.5">{summary}</div>
       </div>
-      <div className="p-3">
-        <div className="grid gap-2 sm:grid-cols-2">
-          {rows.map((r, i) => (
-            <div
-              key={r.k + i}
-              className="flex items-center justify-between rounded-2xl border bg-background px-3 py-2"
-            >
-              <div className="text-xs text-muted-foreground">{r.k}</div>
-              <div className="text-sm font-semibold tabular-nums">
-                {String(r.v ?? "—")}
-              </div>
+      <div className="grid gap-3 p-3 sm:grid-cols-2">
+        <div className="space-y-2">
+          <div className="text-[10px] font-black uppercase tracking-widest text-violet-500">Stats</div>
+          {[["Count", stats?.count ?? "—"], ["Total", `¥${Number(stats?.total_amount??0).toLocaleString()}`], ["Avg", `¥${Number(stats?.avg_amount??0).toLocaleString()}`]].map(([k,v]) => (
+            <div key={k} className="flex items-center justify-between rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 px-3 py-2">
+              <span className="text-xs text-slate-400">{k}</span>
+              <span className="text-sm font-bold font-mono text-slate-700 dark:text-slate-200">{v}</span>
             </div>
           ))}
         </div>
-      </div>
-    </div>
-  );
-}
-
-function ReportCard({ report, title }: { report: any; title?: string }) {
-  const stats = report?.stats ?? {};
-  const steps: string[] = Array.isArray(report?.next_steps)
-    ? report.next_steps
-    : [];
-  const summary = String(report?.summary ?? "Report");
-
-  return (
-    <div className="mt-3 overflow-hidden rounded-3xl border bg-background shadow-sm">
-      <div className="border-b bg-muted/30 px-4 py-3">
-        <div className="text-sm font-semibold">{title ?? "Report"}</div>
-        <div className="mt-1 text-xs text-muted-foreground">{summary}</div>
-      </div>
-
-      <div className="grid gap-3 p-3 lg:grid-cols-2">
-        <MiniKVTable
-          title="Stats"
-          rows={[
-            { k: "Count", v: stats?.count ?? "—" },
-            {
-              k: "Total",
-              v: `¥${Number(stats?.total_amount ?? 0).toLocaleString()}`,
-            },
-            {
-              k: "Avg",
-              v: `¥${Number(stats?.avg_amount ?? 0).toLocaleString()}`,
-            },
-          ]}
-        />
-
-        <div className="overflow-hidden rounded-3xl border bg-background">
-          <div className="border-b bg-muted/30 px-4 py-2 text-sm font-semibold">
-            Next steps
-          </div>
-          <div className="p-3">
-            {steps.length === 0 ? (
-              <div className="text-sm text-muted-foreground">No steps</div>
-            ) : (
-              <ul className="space-y-2">
-                {steps.slice(0, 12).map((s, i) => (
-                  <li key={i} className="flex gap-2 text-sm">
-                    <span className="mt-[2px] inline-block h-5 w-5 shrink-0 rounded-full border bg-background text-center text-xs leading-5 text-muted-foreground">
-                      {i + 1}
-                    </span>
-                    <span className="text-muted-foreground">{s}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
+        <div className="space-y-2">
+          <div className="text-[10px] font-black uppercase tracking-widest text-violet-500">Next Steps</div>
+          {steps.length === 0
+            ? <div className="text-sm text-slate-400">No steps</div>
+            : steps.slice(0,12).map((s, i) => (
+                <div key={i} className="flex gap-2 items-start">
+                  <span className="flex-shrink-0 w-5 h-5 rounded-full bg-gradient-to-br from-violet-500 to-cyan-500 flex items-center justify-center text-[10px] font-bold text-white mt-0.5">{i+1}</span>
+                  <span className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">{s}</span>
+                </div>
+              ))}
         </div>
       </div>
     </div>
   );
 }
 
-// image UI
-function downloadDataUrl(dataUrl: string, filename = "image.png") {
-  const a = document.createElement("a");
-  a.href = dataUrl;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-}
-
-function ImageCard({
-  title,
-  src,
-  kind,
-  poster,
-}: {
-  title?: string;
-  src: string;
-  kind?: Mode | "mixed";
-  poster?: PosterMeta | null;
-}) {
-  const safeName = (
-    title ||
-    poster?.title ||
-    (kind === "income" ? "income" : kind === "outcome" ? "outcome" : "image")
-  )
-    .replace(/[^\w\-]+/g, "_")
-    .slice(0, 40);
-
-  const isPoster = !!poster;
-  const styleText = poster?.style ?? poster?.theme ?? null;
-  const posterBullets = Array.isArray(poster?.bullets) ? poster!.bullets! : [];
-
+// ─── Image Card ───────────────────────────────────────────────────────────────
+function ImageCard({ title, src, kind, poster }: { title?: string; src: string; kind?: Mode|"mixed"; poster?: PosterMeta|null }) {
+  const sn = (title || poster?.title || (kind==="income" ? "income" : kind==="outcome" ? "outcome" : "image"))
+    .replace(/[^\w\-]+/g, "_").slice(0, 40);
   return (
-    <div className="mt-3 overflow-hidden rounded-3xl border bg-background shadow-sm">
-      <div className="flex flex-col gap-2 border-b bg-muted/30 px-4 py-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="truncate text-sm font-semibold">
-                {title ??
-                  poster?.title ??
-                  (kind === "income"
-                    ? "Income Image"
-                    : kind === "outcome"
-                    ? "Outcome Image"
-                    : "Image")}
-              </div>
-
-              {isPoster ? (
-                <span className="rounded-full border bg-background px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-                  Poster
-                </span>
-              ) : null}
-
-              {styleText ? (
-                <span className="rounded-full border bg-background px-2 py-0.5 text-[11px] text-muted-foreground">
-                  {styleText}
-                </span>
-              ) : null}
-
-              {poster?.size ? (
-                <span className="rounded-full border bg-background px-2 py-0.5 text-[11px] text-muted-foreground">
-                  {poster.size}
-                </span>
-              ) : null}
-            </div>
-
-            {poster?.subtitle ? (
-              <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                {poster.subtitle}
-              </div>
-            ) : null}
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => downloadDataUrl(src, `${safeName}.png`)}
-            >
-              Download PNG
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => window.open(src, "_blank")}
-            >
-              Open
-            </Button>
-          </div>
+    <div className="mt-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
+      <div className="border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/80 px-4 py-3 flex items-start justify-between gap-3">
+        <div>
+          <div className="text-[10px] font-black uppercase tracking-widest text-violet-500">{title ?? poster?.title ?? "Image"}</div>
+          {poster?.subtitle && <div className="text-xs text-slate-400 mt-0.5">{poster.subtitle}</div>}
         </div>
-
-        {isPoster && posterBullets.length > 0 ? (
-          <div className="flex flex-wrap gap-2">
-            {posterBullets.slice(0, 4).map((b, i) => (
-              <span
-                key={`${b}-${i}`}
-                className="rounded-full border bg-background px-2 py-1 text-[11px] text-muted-foreground"
-              >
-                {b}
-              </span>
-            ))}
-          </div>
-        ) : null}
+        <div className="flex gap-2 flex-shrink-0">
+          <button onClick={() => dlUrl(src, `${sn}.png`)} className="h-7 px-3 rounded-lg text-xs font-semibold border border-violet-300 dark:border-violet-700 text-violet-600 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/30 transition-colors">↓ PNG</button>
+          <button onClick={() => window.open(src, "_blank")} className="h-7 px-3 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-700 text-slate-500 hover:border-violet-400 transition-colors">Open ↗</button>
+        </div>
       </div>
-
       <div className="p-3">
-        <img
-          src={src}
-          alt={title ?? poster?.title ?? "image"}
-          className="w-full rounded-2xl border"
-        />
+        <img src={src} alt={title ?? poster?.title ?? "image"} className="w-full rounded-xl border border-slate-100 dark:border-slate-800" />
       </div>
     </div>
   );
 }
 
-// main page
+// ─── Dialog helpers ───────────────────────────────────────────────────────────
+const dlgInputCls = "w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-100 text-sm outline-none focus:ring-2 focus:ring-violet-500 transition";
+const dlgSelectCls = "w-full h-10 px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-100 text-sm outline-none focus:ring-2 focus:ring-violet-500 transition";
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
 export default function ChatPage() {
-  const [messages, setMessages] = useState<Msg[]>([]);
-  const [text, setText] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [isDark, setIsDark] = useState(false);
 
+  const [messages,    setMessages]    = useState<Msg[]>([]);
+  const [text,        setText]        = useState("");
+  const [loading,     setLoading]     = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const tTimer    = useRef<number | null>(null);
+  const lTimer    = useRef<number | null>(null);
+  const flRef     = useRef<Record<string, string[]>>({});
 
-  const textTimer = useRef<number | null>(null);
-  const lineTimer = useRef<number | null>(null);
-  const fullLinesRef = useRef<Record<string, string[]>>({});
-
-  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmOpen,    setConfirmOpen]    = useState(false);
+  const [dlgOpen,        setDlgOpen]        = useState(false);
   const [confirmLoading, setConfirmLoading] = useState(false);
-  const [draftAI, setDraftAI] = useState<any>(null);
-  const [draftKind, setDraftKind] = useState<Mode>("outcome");
+  const [draftAI,        setDraftAI]        = useState<any>(null);
+  const [draftKind,      setDraftKind]      = useState<Mode>("outcome");
+  const [remitOpen,      setRemitOpen]      = useState(false);
+  const [remitDraft,     setRemitDraft]     = useState<RemittanceDraft | null>(null);
+  const [pendPrompt,     setPendPrompt]     = useState("");
+  const [pendKind,       setPendKind]       = useState<DesignKind>("outcome");
+  const [dlgOpts,        setDlgOpts]        = useState<string[]>([]);
+  const [selDesign,      setSelDesign]      = useState("");
+  const [dlgGen,         setDlgGen]         = useState(false);
+  const [cBank,     setCBank]     = useState("");
+  const [cDate,     setCDate]     = useState("");
+  const [cCompany,  setCCompany]  = useState("");
+  const [cMonth,    setCMonth]    = useState("");
+  const [rDate, setRDate] = useState("");
+  const [rCustomer, setRCustomer] = useState("");
+  const [rReceiver, setRReceiver] = useState("");
+  const [rPhone, setRPhone] = useState("");
+  const [rMethod, setRMethod] = useState("KBZ Pay");
+  const [rYen, setRYen] = useState("");
+  const [rRate, setRRate] = useState("");
+  const [rFee, setRFee] = useState("0");
+  const [rStatus, setRStatus] = useState<RemittanceStatus>("pending");
+  const [rNote, setRNote] = useState("");
 
-  const [confirmBank, setConfirmBank] = useState<string>("");
-  const [confirmDate, setConfirmDate] = useState<string>("");
-  const [confirmCompany, setConfirmCompany] = useState<string>("");
-  const [confirmMonth, setConfirmMonth] = useState<string>("");
-
-  const quickQA = [
-    "joke တစ်ခု ပြောပေး",
-    "motivation ပေး",
-    "python quiz တစ်ခု ပေး",
-    "BINHLAIG project idea ပေး",
-    "ဒီလ outcome chart ပြ",
-  ];
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, loading]);
-
-  useEffect(() => {
-    return () => {
-      if (textTimer.current) window.clearInterval(textTimer.current);
-      if (lineTimer.current) window.clearInterval(lineTimer.current);
-    };
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, loading]);
+  useEffect(() => () => {
+    if (tTimer.current) clearInterval(tTimer.current);
+    if (lTimer.current) clearInterval(lTimer.current);
   }, []);
 
-  async function parseJsonSafe(res: Response) {
+  // Apply dark class to html element
+  useEffect(() => {
+    if (isDark) document.documentElement.classList.add("dark");
+    else document.documentElement.classList.remove("dark");
+  }, [isDark]);
+
+  async function pjs(res: Response) {
     const raw = await res.text().catch(() => "");
-    try {
-      return raw ? JSON.parse(raw) : {};
-    } catch {
-      return { raw };
-    }
+    try { return raw ? JSON.parse(raw) : {}; } catch { return { raw }; }
   }
-
-  async function askAI(input: string): Promise<AIResult> {
-    const r = await fetch("/api/ai/ask", {
+  function throwAI(r: Response, p: any, tag: string): never {
+    throw new Error(`AI error (${r.status}): ${String(p?.error ?? p?.message ?? p?.raw ?? tag + " failed").slice(0, 300)}`);
+  }
+  async function spOut(input: string, extra?: any): Promise<AIResult> {
+    const r = await fetch("/api/ai/parse-outcome", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: input, ...(extra ?? {}) }) });
+    const p = await pjs(r); if (!r.ok) throwAI(r, p, "parse-outcome"); return p;
+  }
+  async function spIn(input: string, extra?: any): Promise<AIResult> {
+    const r = await fetch("/api/ai/parse-income", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: input, ...(extra ?? {}) }) });
+    const p = await pjs(r); if (!r.ok) throwAI(r, p, "parse-income"); return p;
+  }
+  async function gNS(): Promise<AIResult> {
+    const r = await fetch("/api/ai/next-steps", { method: "GET" });
+    const p = await pjs(r); if (!r.ok) throwAI(r, p, "next-steps"); return p;
+  }
+  async function askRemittance(input: string) {
+    const r = await fetch("/api/ask", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: input }),
     });
-
-    const parsed = await parseJsonSafe(r);
-
-    if (!r.ok) {
-      const msg =
-        parsed?.error ??
-        parsed?.message ??
-        parsed?.detail ??
-        parsed?.raw ??
-        "ask failed";
-      throw new Error(`AI error (${r.status}): ${String(msg).slice(0, 300)}`);
-    }
-
-    return parsed;
+    const p = await pjs(r);
+    if (!r.ok || !p?.ok) throwAI(r, p, "remittance-ask");
+    return {
+      answer: p?.assistant?.message ?? p?.payload?.answer ?? "Remittance output ready.",
+      ...(p?.payload?.remittance ?? {}),
+    };
   }
-
-  async function smartParseIncome(input: string): Promise<AIResult> {
-    const r = await fetch("/api/ai/parse-income", {
+  async function parseRemittance(input: string) {
+    const r = await fetch("/api/ask", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: input }),
     });
-
-    const parsed = await parseJsonSafe(r);
-
-    if (!r.ok) {
-      const msg =
-        parsed?.error ??
-        parsed?.message ??
-        parsed?.detail ??
-        parsed?.raw ??
-        "parse-income failed";
-      throw new Error(`AI error (${r.status}): ${String(msg).slice(0, 300)}`);
-    }
-
-    return parsed;
+    const p = await pjs(r);
+    if (!r.ok || !p?.ok) throwAI(r, p, "remittance-parse");
+    return {
+      answer: p?.assistant?.message ?? "Remittance output ready.",
+      lines: Array.isArray(p?.assistant?.lines) ? p.assistant.lines : [],
+      cards: Array.isArray(p?.assistant?.cards) ? p.assistant.cards : [],
+      ...(p?.payload?.remittanceDraft ?? {}),
+    };
   }
 
-  async function smartParseAny(
-    input: string
-  ): Promise<{ ai: any; kind: Mode | "mixed" }> {
+  async function spAny(input: string): Promise<{ ai: any; kind: Mode|"mixed" }> {
     const raw = (input || "").trim();
-    const ai = await askAI(raw);
-
-    if (isFunLikeIntent(ai)) {
-      return { ai, kind: "mixed" };
+    if (/(^|\s)(next steps|insight|report|analysis|summary|အကြံပြု|ဘာတွေလုပ်ရမလဲ)(\s|$)/i.test(raw)) {
+      const ai = await gNS(); return { ai, kind: "outcome" };
     }
-
-    if (isFinanceIntent(ai)) {
-      const kind = detectKindByIntent(ai);
-      return { ai, kind: kind === "mixed" ? detectKindByText(raw) : kind };
-    }
-
-    // optional fallback for income specific endpoint
     const guess = detectKindByText(raw);
-    if (guess === "income" && !isFinanceIntent(ai)) {
-      try {
-        const incomeAI = await smartParseIncome(raw);
-        const kind = detectKindByIntent(incomeAI);
-        return { ai: incomeAI, kind: kind === "mixed" ? "income" : kind };
-      } catch (e) {
-        if (!isBadRequestLike(e)) throw e;
-      }
+    if (guess === "income") {
+      try { const ai = await spIn(raw); const k = detectKindByIntent(ai); return { ai, kind: k === "mixed" ? "income" : k }; }
+      catch (e) { if (!isBadRequestLike(e)) throw e; const ai = await spOut(raw); const k = detectKindByIntent(ai); return { ai, kind: k === "mixed" ? "outcome" : k }; }
     }
-
-    return { ai, kind: "mixed" };
+    if (guess === "outcome") {
+      try { const ai = await spOut(raw); const k = detectKindByIntent(ai); return { ai, kind: k === "mixed" ? "outcome" : k }; }
+      catch (e) { if (!isBadRequestLike(e)) throw e; const ai = await spIn(raw); const k = detectKindByIntent(ai); return { ai, kind: k === "mixed" ? "income" : k }; }
+    }
+    try {
+      const ai1 = await spOut(raw); const k1 = detectKindByIntent(ai1);
+      if (isRecognized(ai1)) return { ai: ai1, kind: k1 === "mixed" ? "outcome" : k1 };
+      const ai2 = await spIn(raw); const k2 = detectKindByIntent(ai2);
+      if (isRecognized(ai2)) return { ai: ai2, kind: k2 === "mixed" ? "income" : k2 };
+      return { ai: ai1, kind: "mixed" };
+    } catch {
+      const ai2 = await spIn(raw); const k2 = detectKindByIntent(ai2);
+      return { ai: ai2, kind: k2 === "mixed" ? "income" : k2 };
+    }
   }
 
-  async function saveOutcome(
-    ai: any,
-    override?: { bank?: string; dateISO?: string }
-  ) {
+  async function saveOutcome(ai: any, ov?: { bank?: string; dateISO?: string }) {
     const p = getPayload(ai);
-
-    const bank = override?.bank ?? p.bank ?? ai?.bank ?? "—";
-    const dateISO =
-      override?.dateISO ?? p.date ?? ai?.date ?? new Date().toISOString();
-
     const r = await fetch("/api/outcome", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         amount: p.amount ?? ai?.amount ?? "",
-        shop: p.shop ?? ai?.shop ?? "",
-        bank,
-        notice: `${p.notice ?? ai?.notice ?? ""}`.trim(),
-        date: dateISO,
+        shop:   p.shop   ?? ai?.shop   ?? "",
+        bank:   ov?.bank ?? p.bank ?? ai?.bank ?? "—",
+        notice: String(p.notice ?? ai?.notice ?? "").trim(),
+        date:   ov?.dateISO ?? p.date ?? ai?.date ?? new Date().toISOString(),
       }),
     });
-
-    if (!r.ok) {
-      const parsed = await parseJsonSafe(r);
-      const msg =
-        parsed?.error ??
-        parsed?.message ??
-        parsed?.detail ??
-        parsed?.raw ??
-        "Save failed";
-      throw new Error(
-        `Save failed (${r.status}): ${String(msg).slice(0, 200)}`
-      );
-    }
+    if (!r.ok) { const pd = await pjs(r); throw new Error(`Save failed (${r.status}): ${String(pd?.error ?? pd?.message ?? "Save failed").slice(0, 200)}`); }
   }
-
-  async function saveIncome(
-    ai: any,
-    override?: { company?: string; month?: string; dateISO?: string }
-  ) {
+  async function saveIncome(ai: any, ov?: { company?: string; month?: string; dateISO?: string }) {
     const p = getPayload(ai);
-
-    const dateISO =
-      override?.dateISO ?? p.date ?? ai?.date ?? new Date().toISOString();
-
-    const date = new Date(dateISO);
-    const y = date.getUTCFullYear();
-    const m = String(date.getUTCMonth() + 1).padStart(2, "0");
-    const monthAuto = `${y}-${m}`;
-
-    const company =
-      override?.company ??
-      p.company ??
-      p.compamy ??
-      ai?.company ??
-      ai?.compamy ??
-      "—";
-
-    const month = override?.month ?? p.month ?? ai?.month ?? monthAuto;
-
+    const dISO = ov?.dateISO ?? p.date ?? ai?.date ?? new Date().toISOString();
+    const d = new Date(dISO);
+    const y = d.getUTCFullYear(), m = String(d.getUTCMonth()+1).padStart(2,"0");
     const r = await fetch("/api/incomes", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        amount: p.amount ?? ai?.amount ?? "",
-        month,
-        compamy: company,
-        notice: p.notice ?? ai?.notice ?? "",
-        date: dateISO,
+        amount:  p.amount ?? ai?.amount ?? "",
+        month:   ov?.month   ?? p.month   ?? ai?.month   ?? `${y}-${m}`,
+        compamy: ov?.company ?? p.company ?? p.compamy ?? ai?.company ?? ai?.compamy ?? "—",
+        notice:  String(p.notice ?? ai?.notice ?? "").trim(),
+        date:    dISO,
       }),
     });
-
-    if (!r.ok) {
-      const parsed = await parseJsonSafe(r);
-      const msg =
-        parsed?.error ??
-        parsed?.message ??
-        parsed?.detail ??
-        parsed?.raw ??
-        "Save failed";
-      throw new Error(
-        `Save failed (${r.status}): ${String(msg).slice(0, 200)}`
-      );
-    }
+    if (!r.ok) { const pd = await pjs(r); throw new Error(`Save failed (${r.status}): ${String(pd?.error ?? pd?.message ?? "Save failed").slice(0, 200)}`); }
   }
 
-  function streamAIText(fullText: string) {
-    const aiId = uid();
-    setMessages((p) => [
-      ...p,
-      { id: aiId, role: "ai", text: "", streaming: true },
-    ]);
-
-    let i = 0;
-    const speedMs = 12;
-
-    if (textTimer.current) window.clearInterval(textTimer.current);
-    if (lineTimer.current) window.clearInterval(lineTimer.current);
-
-    textTimer.current = window.setInterval(() => {
-      i += 1;
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === aiId
-            ? {
-                ...m,
-                text: fullText.slice(0, i),
-                streaming: i < fullText.length,
-              }
-            : m
-        )
-      );
-
-      if (i >= fullText.length) {
-        if (textTimer.current) window.clearInterval(textTimer.current);
-        textTimer.current = null;
-      }
-    }, speedMs);
+  function openRemitConfirm(draft: RemittanceDraft) {
+    setRemitDraft(draft);
+    setRDate(draft.date || new Date().toISOString().slice(0, 10));
+    setRCustomer(draft.customerName || "");
+    setRReceiver(draft.receiverName || "");
+    setRPhone(draft.receiverPhone || "");
+    setRMethod(draft.payoutMethod || "KBZ Pay");
+    setRYen(String(draft.yenAmount || ""));
+    setRRate(String(draft.exchangeRate || ""));
+    setRFee(String(draft.serviceFee || 0));
+    setRStatus(draft.status || "pending");
+    setRNote(draft.note || "");
+    setRemitOpen(true);
   }
 
-  function draftLines(
-    fullLines: string[],
-    extra?: Partial<Msg>,
-    afterDone?: () => void
-  ) {
-    const aiId = uid();
-    fullLinesRef.current[aiId] = fullLines;
-
-    setMessages((p) => [
-      ...p,
-      {
-        id: aiId,
-        role: "ai",
-        text: "",
-        lines: [""],
-        streaming: true,
-        done: false,
-        ...extra,
-      },
-    ]);
-
-    let lineIdx = 0;
-    let charIdx = 0;
-    const speedMs = 14;
-
-    if (textTimer.current) window.clearInterval(textTimer.current);
-    if (lineTimer.current) window.clearInterval(lineTimer.current);
-
-    lineTimer.current = window.setInterval(() => {
-      const all = fullLinesRef.current[aiId] ?? [];
-      if (!all.length) return;
-
-      const currentFull = String(all[lineIdx] ?? "");
-
-      setMessages((prev) =>
-        prev.map((m) => {
-          if (m.id !== aiId) return m;
-
-          const curLines = Array.isArray(m.lines) ? [...m.lines] : [""];
-          while (curLines.length < lineIdx + 1) curLines.push("");
-
-          const nextChar = currentFull.charAt(charIdx);
-          curLines[lineIdx] = (curLines[lineIdx] ?? "") + nextChar;
-
-          return { ...m, lines: curLines, streaming: true };
-        })
-      );
-
-      charIdx += 1;
-
-      if (charIdx >= currentFull.length) {
-        lineIdx += 1;
-        charIdx = 0;
-
-        setMessages((prev) =>
-          prev.map((m) => {
-            if (m.id !== aiId) return m;
-            const curLines = Array.isArray(m.lines) ? [...m.lines] : [];
-            if (lineIdx < all.length) curLines.push("");
-            return { ...m, lines: curLines, streaming: lineIdx < all.length };
-          })
-        );
-
-        if (lineIdx >= all.length) {
-          if (lineTimer.current) window.clearInterval(lineTimer.current);
-          lineTimer.current = null;
-
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === aiId ? { ...m, streaming: false, done: true } : m
-            )
-          );
-
-          delete fullLinesRef.current[aiId];
-
-          window.setTimeout(() => {
-            setMessages((prev) =>
-              prev.map((m) => (m.id === aiId ? { ...m, done: false } : m))
-            );
-          }, 1200);
-
-          afterDone?.();
-        }
-      }
-    }, speedMs);
-  }
-
-  function addTableOnlyMessage(
-    kind: Mode,
-    items: any[],
-    lines?: string[],
-    cards?: AICard[],
-    actions?: AIAction[],
-    title?: string
-  ) {
-    setMessages((p) => [
-      ...p,
-      {
-        id: uid(),
-        role: "ai",
-        text: `${kind === "income" ? "Income" : "Outcome"} ${
-          items.length
-        } records`,
-        lines,
-        cards,
-        actions,
-        table: { title: title ?? `Total ${items.length}`, rows: items, kind },
-      },
-    ]);
-  }
-
-  function addReportMessage(kind: Mode | "mixed", ai: any) {
-    const payload = getPayload(ai);
-    const report = payload?.report ?? ai?.report ?? null;
-    const lines = pickLines(ai);
-    const cards = pickCards(ai);
-    const actions = pickActions(ai);
-
-    if (lines.length > 0) {
-      draftLines(
-        lines,
-        { cards, actions },
-        () => {
-          setMessages((p) => [
-            ...p,
-            { id: uid(), role: "ai", text: "", report, reportKind: kind },
-          ]);
-        }
-      );
-      return;
-    }
-
-    setMessages((p) => [
-      ...p,
-      {
-        id: uid(),
-        role: "ai",
-        text: pickAnswerText(ai),
-        cards,
-        actions,
-        report,
-        reportKind: kind,
-      },
-    ]);
-  }
-
-  function addChartMessage(kind: Mode, ai: any) {
-    const lines = pickLines(ai);
-    const cards = pickCards(ai);
-    const actions = pickActions(ai);
-    const { series, filters } = pickChartSeries(ai);
-
-    setMessages((p) => [
-      ...p,
-      {
-        id: uid(),
-        role: "ai",
-        text: pickAnswerText(ai),
-        lines: lines.length ? lines : undefined,
-        cards,
-        actions,
-        chart: { series, filters, kind },
-      },
-    ]);
-  }
-
-  function addImageMessage(kind: Mode | "mixed", ai: any) {
-    const lines = pickLines(ai);
-    const cards = pickCards(ai);
-    const actions = pickActions(ai);
-    const img = pickImage(ai);
-    const poster = pickPoster(ai);
-
-    setMessages((p) => [
-      ...p,
-      {
-        id: uid(),
-        role: "ai",
-        text: pickAnswerText(ai),
-        lines: lines.length ? lines : undefined,
-        cards,
-        actions,
-        image: img ? { ...img, kind, poster } : undefined,
-      },
-    ]);
-  }
-
-  function openConfirmForOutcome(ai: any) {
-    const p = getPayload(ai);
-
-    const missing: string[] = Array.isArray(p?.missing_fields)
-      ? p.missing_fields
-      : Array.isArray(ai?.missing_fields)
-      ? ai.missing_fields
-      : [];
-
-    const suggestions: string[] = Array.isArray(p?.bank_suggestions)
-      ? p.bank_suggestions
-      : Array.isArray(ai?.bank_suggestions)
-      ? ai.bank_suggestions
-      : [];
-
-    const suggestedDateISO = String(
-      p?.suggested_date ?? ai?.suggested_date ?? new Date().toISOString()
-    );
-
-    const currentBank = String(p?.bank ?? ai?.bank ?? "").trim();
-
-    const d = new Date(suggestedDateISO);
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
-    const ymd = `${yyyy}-${mm}-${dd}`;
-
-    setDraftAI(ai);
-    setDraftKind("outcome");
-
-    if (currentBank) setConfirmBank(currentBank);
-    else if (suggestions.length) setConfirmBank(String(suggestions[0]));
-    else setConfirmBank("Cash");
-
-    setConfirmDate(ymd);
-
-    const needsConfirm = Boolean(
-      p?.needs_confirm ?? ai?.needs_confirm ?? false
-    );
-    if (needsConfirm || missing.includes("bank") || missing.includes("date")) {
-      setConfirmOpen(true);
-    } else {
-      saveOutcome(ai).catch(console.error);
-    }
-  }
-
-  function openConfirmForIncome(ai: any) {
-    const p = getPayload(ai);
-
-    const missing: string[] = Array.isArray(p?.missing_fields)
-      ? p.missing_fields
-      : Array.isArray(ai?.missing_fields)
-      ? ai.missing_fields
-      : [];
-
-    const suggestedDateISO = String(
-      p?.suggested_date ?? ai?.suggested_date ?? new Date().toISOString()
-    );
-
-    const d = new Date(suggestedDateISO);
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
-    const ymd = `${yyyy}-${mm}-${dd}`;
-    const ym = `${yyyy}-${mm}`;
-
-    const currentCompany = String(
-      p?.company ?? p?.compamy ?? ai?.company ?? ai?.compamy ?? ""
-    ).trim();
-
-    const currentMonth = String(p?.month ?? ai?.month ?? "").trim();
-
-    setDraftAI(ai);
-    setDraftKind("income");
-
-    setConfirmDate(ymd);
-    setConfirmMonth(currentMonth || ym);
-    setConfirmCompany(currentCompany || "Salary");
-
-    const needsConfirm = Boolean(
-      p?.needs_confirm ?? ai?.needs_confirm ?? false
-    );
-    if (
-      needsConfirm ||
-      missing.includes("company") ||
-      missing.includes("month") ||
-      missing.includes("date")
-    ) {
-      setConfirmOpen(true);
-    } else {
-      saveIncome(ai).catch(console.error);
-    }
-  }
-
-  async function onConfirmSave() {
-    if (!draftAI) {
-      setConfirmOpen(false);
-      return;
-    }
-
+  async function onSaveRemittance() {
     try {
       setConfirmLoading(true);
 
-      const dateISO = confirmDate
-        ? new Date(`${confirmDate}T00:00:00.000Z`).toISOString()
-        : new Date().toISOString();
+      const r = await fetch("/api/remittances", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          date: rDate,
+          customerName: rCustomer,
+          receiverName: rReceiver,
+          receiverPhone: rPhone,
+          payoutMethod: rMethod,
+          yenAmount: Number(rYen),
+          exchangeRate: Number(rRate),
+          serviceFee: Number(rFee || 0),
+          status: rStatus,
+          note: rNote,
+        }),
+      });
 
-      if (draftKind === "outcome") {
-        await saveOutcome(draftAI, { bank: confirmBank || "—", dateISO });
-
-        setMessages((p) => [
-          ...p,
-          {
-            id: uid(),
-            role: "ai",
-            text: "",
-            lines: [
-              "✅ Saved (Outcome)",
-              `Bank: \`${confirmBank || "—"}\``,
-              `Date: \`${confirmDate || "—"}\``,
-            ],
-            streaming: false,
-            done: true,
-          },
-        ]);
-      } else {
-        await saveIncome(draftAI, {
-          company: confirmCompany || "—",
-          month: confirmMonth || "",
-          dateISO,
-        });
-
-        setMessages((p) => [
-          ...p,
-          {
-            id: uid(),
-            role: "ai",
-            text: "",
-            lines: [
-              "✅ Saved (Income)",
-              `Company: \`${confirmCompany || "—"}\``,
-              `Month: \`${confirmMonth || "—"}\``,
-              `Date: \`${confirmDate || "—"}\``,
-            ],
-            streaming: false,
-            done: true,
-          },
-        ]);
+      if (!r.ok) {
+        const pd = await pjs(r);
+        throw new Error(`Save failed (${r.status}): ${String(pd?.error ?? pd?.message ?? "Save failed").slice(0, 200)}`);
       }
 
-      setConfirmOpen(false);
-      setDraftAI(null);
-    } catch (e: any) {
+      setMessages(prev => [...prev, {
+        id: uid(),
+        role: "ai",
+        text: "",
+        lines: [
+          "✅ Saved (Remittance)",
+          `Customer: \`${rCustomer || "—"}\``,
+          `Receiver: \`${rReceiver || "—"}\``,
+          `JPY: \`${yen(rYen)}\``,
+          `MMK: \`${mmk(Number(rYen) * Number(rRate))}\``,
+        ],
+        streaming: false,
+        done: true,
+      }]);
+
+      setRemitOpen(false);
+      setRemitDraft(null);
+    } catch (e) {
       console.error(e);
-      streamAIText(`❌ ${e?.message ?? "Save failed"}`);
+      streamText(`❌ ${(e as any)?.message ?? "Save failed"}`);
     } finally {
       setConfirmLoading(false);
     }
   }
 
-  const bankSuggestions = useMemo(() => {
+  function streamText(ft: string) {
+    const id = uid();
+    setMessages(prev => [...prev, { id, role: "ai", text: "", streaming: true }]);
+    let i = 0;
+    if (tTimer.current) clearInterval(tTimer.current);
+    tTimer.current = window.setInterval(() => {
+      i++;
+      setMessages(prev => prev.map(m => m.id === id ? { ...m, text: ft.slice(0, i), streaming: i < ft.length } : m));
+      if (i >= ft.length) { clearInterval(tTimer.current!); tTimer.current = null; }
+    }, 12);
+  }
+
+  function draftLines(fl: string[], extra?: Partial<Msg>, onDone?: () => void) {
+    const id = uid();
+    flRef.current[id] = fl;
+    setMessages(prev => [...prev, { id, role: "ai", text: "", lines: [""], streaming: true, done: false, ...extra }]);
+    let li = 0, ci = 0;
+    if (tTimer.current) clearInterval(tTimer.current);
+    if (lTimer.current) clearInterval(lTimer.current);
+    lTimer.current = window.setInterval(() => {
+      const all = flRef.current[id] ?? [];
+      if (!all.length) return;
+      const cur = String(all[li] ?? "");
+      setMessages(prev => prev.map(m => {
+        if (m.id !== id) return m;
+        const cl = Array.isArray(m.lines) ? [...m.lines] : [""];
+        while (cl.length < li+1) cl.push("");
+        cl[li] = (cl[li] ?? "") + cur.charAt(ci);
+        return { ...m, lines: cl, streaming: true };
+      }));
+      ci++;
+      if (ci >= cur.length) {
+        li++; ci = 0;
+        setMessages(prev => prev.map(m => {
+          if (m.id !== id) return m;
+          const cl = Array.isArray(m.lines) ? [...m.lines] : [];
+          if (li < all.length) cl.push("");
+          return { ...m, lines: cl, streaming: li < all.length };
+        }));
+        if (li >= all.length) {
+          clearInterval(lTimer.current!); lTimer.current = null;
+          setMessages(prev => prev.map(m => m.id === id ? { ...m, streaming: false, done: true } : m));
+          delete flRef.current[id];
+          setTimeout(() => {
+            setMessages(prev => prev.map(m => m.id === id ? { ...m, done: false } : m));
+            onDone?.();
+          }, 900);
+        }
+      }
+    }, 14);
+  }
+
+  function addTable(kind: Mode, items: any[], lines?: string[], cards?: AICard[], actions?: AIAction[], title?: string) {
+    const label = (kind === "income" ? "Income" : "Outcome") + " " + items.length + " records";
+    const tableData = { title: title ?? ("Total " + items.length), rows: items, kind };
+    setMessages(prev => [...prev, {
+      id: uid(), role: "ai", text: "", lines: undefined, cards, actions,
+      table: tableData,
+    }]);
+  }
+  function addReport(kind: Mode|"mixed", ai: any) {
+    const p = getPayload(ai), report = p?.report ?? ai?.report ?? null;
+    const lines = pickLines(ai), cards = pickCards(ai), actions = pickActions(ai);
+    const answerLines = lines.length > 0 ? lines : [pickAnswerText(ai)];
+    draftLines(answerLines, { cards, actions }, () =>
+      setMessages(prev => [...prev, { id: uid(), role: "ai", text: "", report, reportKind: kind }])
+    );
+  }
+  function addChart(kind: Mode, ai: any) {
+    const lines = pickLines(ai), cards = pickCards(ai), actions = pickActions(ai);
+    const { series, filters } = pickChartSeries(ai);
+    const answerLines = lines.length > 0 ? lines : [pickAnswerText(ai)];
+    draftLines(answerLines, { cards, actions }, () =>
+      setMessages(prev => [...prev, { id: uid(), role: "ai", text: "", chart: { series, filters, kind } }])
+    );
+  }
+  function addImage(kind: Mode|"mixed", ai: any) {
+    const lines = pickLines(ai), cards = pickCards(ai), actions = pickActions(ai);
+    const img = pickImage(ai), poster = pickPoster(ai);
+    const answerLines = lines.length > 0 ? lines : [pickAnswerText(ai)];
+    draftLines(answerLines, { cards, actions }, () =>
+      setMessages(prev => [...prev, { id: uid(), role: "ai", text: "", image: img ? { ...img, kind, poster } : undefined }])
+    );
+  }
+
+  function openDlg(ai: any, input: string, kind: DesignKind) {
+    const sel = pickDesignSelection(ai), opts = Array.isArray(sel?.options) ? sel!.options! : [];
+    setPendPrompt(input); setPendKind(kind); setDlgOpts(opts);
+    setSelDesign(sel?.selected ?? sel?.default ?? opts[0] ?? "");
+    setDlgOpen(true);
+  }
+  async function genDesign() {
+    if (!pendPrompt.trim() || !selDesign.trim()) return;
+    try {
+      setDlgGen(true);
+      const ai = pendKind === "income"
+        ? await spIn(pendPrompt, { design: selDesign, generate_now: true })
+        : await spOut(pendPrompt, { design: selDesign, generate_now: true });
+      const lines = pickLines(ai), cards = pickCards(ai), actions = pickActions(ai);
+      const p = getPayload(ai), intent = String(ai?.intent ?? p?.intent ?? "");
+      setDlgOpen(false);
+      if (intent === "outcome_image" || intent === "income_image") {
+        addImage(pendKind, ai);
+        return;
+      }
+      if (lines.length > 0) { draftLines(lines, { cards, actions }); return; }
+      streamText(pickAnswerText(ai));
+    } catch (e: any) { console.error(e); streamText(`❌ ${e?.message ?? "Image generate failed"}`); }
+    finally { setDlgGen(false); }
+  }
+
+  function openConfOut(ai: any) {
+    const p = getPayload(ai);
+    const miss: string[] = Array.isArray(p?.missing_fields) ? p.missing_fields : Array.isArray(ai?.missing_fields) ? ai.missing_fields : [];
+    const sugg: string[] = Array.isArray(p?.bank_suggestions) ? p.bank_suggestions : Array.isArray(ai?.bank_suggestions) ? ai.bank_suggestions : [];
+    const dISO = String(p?.suggested_date ?? ai?.suggested_date ?? new Date().toISOString());
+    const d = new Date(dISO);
+    const ymd = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+    const curBank = String(p?.bank ?? ai?.bank ?? "").trim();
+    setDraftAI(ai); setDraftKind("outcome");
+    if (curBank) setCBank(curBank); else if (sugg.length) setCBank(String(sugg[0])); else setCBank("Cash");
+    setCDate(ymd);
+    if (Boolean(p?.needs_confirm ?? ai?.needs_confirm ?? false) || miss.includes("bank") || miss.includes("date"))
+      setConfirmOpen(true);
+    else saveOutcome(ai).catch(console.error);
+  }
+  function openConfIn(ai: any) {
+    const p = getPayload(ai);
+    const miss: string[] = Array.isArray(p?.missing_fields) ? p.missing_fields : Array.isArray(ai?.missing_fields) ? ai.missing_fields : [];
+    const dISO = String(p?.suggested_date ?? ai?.suggested_date ?? new Date().toISOString());
+    const d = new Date(dISO);
+    const y = d.getFullYear(), mm = String(d.getMonth()+1).padStart(2,"0"), dd = String(d.getDate()).padStart(2,"0");
+    setDraftAI(ai); setDraftKind("income");
+    setCDate(`${y}-${mm}-${dd}`);
+    setCMonth(String(p?.month ?? ai?.month ?? "").trim() || `${y}-${mm}`);
+    setCCompany(String(p?.company ?? p?.compamy ?? ai?.company ?? ai?.compamy ?? "").trim() || "Salary");
+    if (Boolean(p?.needs_confirm ?? ai?.needs_confirm ?? false) || miss.includes("company") || miss.includes("month") || miss.includes("date"))
+      setConfirmOpen(true);
+    else saveIncome(ai).catch(console.error);
+  }
+
+  async function onSave() {
+    if (!draftAI) { setConfirmOpen(false); return; }
+    try {
+      setConfirmLoading(true);
+      const dISO = cDate ? new Date(`${cDate}T00:00:00.000Z`).toISOString() : new Date().toISOString();
+      if (draftKind === "outcome") {
+        await saveOutcome(draftAI, { bank: cBank || "—", dateISO: dISO });
+        setMessages(prev => [...prev, { id: uid(), role: "ai", text: "", lines: ["✅ Saved (Outcome)", "Bank: `" + (cBank || "—") + "`", "Date: `" + (cDate || "—") + "`"], streaming: false, done: true }]);
+      } else {
+        await saveIncome(draftAI, { company: cCompany || "—", month: cMonth || "", dateISO: dISO });
+        setMessages(prev => [...prev, { id: uid(), role: "ai", text: "", lines: ["✅ Saved (Income)", "Company: `" + (cCompany || "—") + "`", "Month: `" + (cMonth || "—") + "`", "Date: `" + (cDate || "—") + "`"], streaming: false, done: true }]);
+      }
+      setConfirmOpen(false); setDraftAI(null);
+    } catch (e) { console.error(e); streamText(`❌ ${(e as any)?.message ?? "Save failed"}`); }
+    finally { setConfirmLoading(false); }
+  }
+
+  const bankSugg = useMemo(() => {
     const p = draftAI ? getPayload(draftAI) : null;
-    const list: string[] = Array.isArray(p?.bank_suggestions)
-      ? p.bank_suggestions
-      : Array.isArray(draftAI?.bank_suggestions)
-      ? draftAI.bank_suggestions
-      : [];
-    return list.length
-      ? list
-      : [
-          "Cash",
-          "PayPay",
-          "LINE Pay",
-          "Suica",
-          "JCB 7/11",
-          "Visa UFL",
-          "VISA SMBC",
-        ];
+    const l: string[] = Array.isArray(p?.bank_suggestions) ? p.bank_suggestions : Array.isArray(draftAI?.bank_suggestions) ? draftAI.bank_suggestions : [];
+    return l.length ? l : ["Cash","PayPay","LINE Pay","Suica","JCB 7/11","Visa UFL","VISA SMBC"];
   }, [draftAI]);
 
-  async function sendWithValue(raw: string) {
-    const t = raw.trim();
-    if (!t || loading) return;
-
-    setMessages((p) => [...p, { id: uid(), role: "user", text: t }]);
-    setText("");
-    setLoading(true);
-
+  async function sendVal(raw: string) {
+    const t = raw.trim(); if (!t || loading) return;
+    setMessages(prev => [...prev, { id: uid(), role: "user", text: t }]);
+    setText(""); setLoading(true);
     try {
-      const { ai, kind } = await smartParseAny(t);
-      const lines = pickLines(ai);
-      const cards = pickCards(ai);
-      const actions = pickActions(ai);
-
-      const payload = getPayload(ai);
-      const intent = String(ai?.intent ?? payload?.intent ?? "");
-
-      if (isFunLikeIntent(ai)) {
-        if (lines.length > 0) {
-          draftLines(lines, { cards, actions });
-        } else {
-          setMessages((p) => [
-            ...p,
-            {
-              id: uid(),
-              role: "ai",
-              text: pickAnswerText(ai),
-              cards,
-              actions,
-            },
-          ]);
+      if (isRemittanceCreateText(t)) {
+        const data = await parseRemittance(t);
+        const lines = data.lines.length ? data.lines : [String(data.answer)];
+        draftLines(lines, {
+          cards: data.cards,
+          actions: [{
+            type: "save_remittance",
+            label: "Save Remittance",
+            value: JSON.stringify(data),
+          }],
+        });
+        if (data?.customerName || data?.receiverName || data?.yenAmount) {
+          setRemitDraft(data as RemittanceDraft);
         }
         return;
       }
 
-      const detectedByIntent = detectKindByIntent(ai);
-      const kindFinal = (detectedByIntent !== "mixed"
-        ? detectedByIntent
-        : kind === "mixed"
-        ? detectKindByText(t) === "income"
-          ? "income"
-          : "outcome"
-        : kind) as Mode;
-
-      if (
-        intent === "outcome_image" ||
-        intent === "income_image" ||
-        intent === "poster_image"
-      ) {
-        const imgKind = intent === "poster_image" ? "mixed" : kindFinal;
-        if (lines.length > 0) {
-          draftLines(lines, { cards, actions }, () =>
-            addImageMessage(imgKind, ai)
-          );
-        } else {
-          addImageMessage(imgKind, ai);
-        }
+      if (isRemittanceText(t)) {
+        const data = await askRemittance(t);
+        const lines = [
+          String(data?.answer ?? "Remittance output ready."),
+          `Records: \`${data?.summary?.records ?? 0}\``,
+          `JPY: \`${yen(data?.summary?.totalJpy ?? 0)}\``,
+          `MMK: \`${mmk(data?.summary?.totalMmk ?? 0)}\``,
+        ];
+        draftLines(lines, {
+          remittance: {
+            summary: data.summary,
+            rows: Array.isArray(data.rows) ? data.rows : [],
+          },
+        });
         return;
       }
 
-      if (intent === "charts_outcomes" || intent === "charts_incomes") {
-        addChartMessage(kindFinal, ai);
+      const { ai, kind } = await spAny(t);
+      const lines = pickLines(ai), cards = pickCards(ai), actions = pickActions(ai);
+      const payload = getPayload(ai), intent = String(ai?.intent ?? payload?.intent ?? "");
+      const dk  = detectKindByIntent(ai);
+      const kF  = (dk !== "mixed" ? dk : kind === "mixed" ? (detectKindByText(t) === "income" ? "income" : "outcome") : kind) as Mode;
+
+      if (intent === "select_outcome_image_design") { if (lines.length > 0) draftLines(lines, { cards, actions }); openDlg(ai, t, "outcome"); return; }
+      if (intent === "select_income_image_design")  { if (lines.length > 0) draftLines(lines, { cards, actions }); openDlg(ai, t, "income");  return; }
+
+      if (intent === "outcome_image" || intent === "income_image" || intent === "poster_image") {
+        addImage(intent === "poster_image" ? "mixed" : kF, ai);
         return;
       }
-
-      if (
-        intent === "list_outcomes" ||
-        intent === "list_incomes" ||
-        intent === "query_outcome"
-      ) {
-        let items: any[] = Array.isArray(payload?.items)
-          ? payload.items
-          : Array.isArray(ai?.items)
-          ? ai.items
-          : [];
-
-        if (
-          items.length === 0 &&
-          typeof ai?.answer === "string" &&
-          intent === "list_outcomes"
-        ) {
-          items = parseItemsFromAnswer(ai.answer);
-        }
-
-        addTableOnlyMessage(
-          kindFinal,
-          items,
-          lines.length ? lines : undefined,
-          cards,
-          actions,
-          payload?.meta?.title ?? undefined
+      if (intent === "charts_outcomes" || intent === "charts_incomes") { addChart(kF, ai); return; }
+      if (intent === "list_outcomes" || intent === "list_incomes" || intent === "query_outcome") {
+        let items: any[] = Array.isArray(payload?.items) ? payload.items : Array.isArray(ai?.items) ? ai.items : [];
+        if (items.length === 0 && typeof ai?.answer === "string" && intent === "list_outcomes") items = parseItemsFromAnswer(ai.answer);
+        const answerLines = lines.length > 0 ? lines : [pickAnswerText(ai)];
+        draftLines(answerLines, { cards, actions }, () =>
+          addTable(kF, items, undefined, undefined, undefined, payload?.meta?.title ?? undefined)
         );
         return;
       }
-
-      if (intent === "next_steps_report" || intent === "income_report") {
-        addReportMessage(kindFinal, ai);
-        return;
-      }
-
+      if (intent === "next_steps_report" || intent === "income_report") { addReport(kF, ai); return; }
       if (intent === "create_outcome") {
-        if (lines.length > 0) {
-          draftLines(lines, { cards, actions }, () =>
-            openConfirmForOutcome(ai)
-          );
-        } else {
-          openConfirmForOutcome(ai);
-        }
+        const ansLines = lines.length > 0 ? lines : [pickAnswerText(ai)];
+        draftLines(ansLines, { cards, actions }, () => openConfOut(ai));
         return;
       }
-
       if (intent === "create_income") {
-        if (lines.length > 0) {
-          draftLines(lines, { cards, actions }, () => openConfirmForIncome(ai));
-        } else {
-          openConfirmForIncome(ai);
-        }
+        const ansLines = lines.length > 0 ? lines : [pickAnswerText(ai)];
+        draftLines(ansLines, { cards, actions }, () => openConfIn(ai));
         return;
       }
-
-      if (lines.length > 0) {
-        draftLines(lines, { cards, actions });
-        return;
-      }
-
-      setMessages((p) => [
-        ...p,
-        {
-          id: uid(),
-          role: "ai",
-          text: pickAnswerText(ai),
-          cards,
-          actions,
-        },
-      ]);
-    } catch (e: any) {
-      console.error(e);
-      streamAIText(`❌ ${e?.message ?? "AI error. Please try again."}`);
-    } finally {
-      setLoading(false);
-    }
+      if (lines.length > 0) { draftLines(lines, { cards, actions }); return; }
+      streamText(pickAnswerText(ai));
+    } catch (e) { console.error(e); streamText("❌ " + ((e as any)?.message ?? "AI error. Please try again.")); }
+    finally { setLoading(false); }
   }
 
-  async function send() {
-    await sendWithValue(text);
-  }
-
-  async function onActionClick(action: AIAction) {
-    const actionType = String(action?.type ?? "");
-    const value = String(action?.value ?? "").trim();
-
-    if (actionType === "prompt" && value) {
-      await sendWithValue(value);
+  async function onAct(action: AIAction) {
+    const at = String(action?.type ?? ""), val = String(action?.value ?? "").trim();
+    if (at === "prompt" && val) { await sendVal(val); return; }
+    if (at === "download_image") {
+      const last = [...messages].reverse().find(m => m.image?.src);
+      if (last?.image?.src) dlUrl(last.image.src, `${(last.image.title || last.image.poster?.title || "image").replace(/[^\w\-]+/g,"_").slice(0,40)}.png`);
       return;
     }
-
-    if (actionType === "download_image") {
-      const lastImage = [...messages].reverse().find((m) => m.image?.src);
-      if (lastImage?.image?.src) {
-        const filename = (
-          lastImage.image.title ||
-          lastImage.image.poster?.title ||
-          "image"
-        )
-          .replace(/[^\w\-]+/g, "_")
-          .slice(0, 40);
-        downloadDataUrl(lastImage.image.src, `${filename}.png`);
+    if (at === "confirm_save_outcome" && draftAI) { setConfirmOpen(true); return; }
+    if (at === "save_remittance") {
+      try {
+        const parsed = val ? JSON.parse(val) : remitDraft;
+        if (parsed) openRemitConfirm(parsed as RemittanceDraft);
+      } catch {
+        if (remitDraft) openRemitConfirm(remitDraft);
       }
       return;
     }
-
-    if (actionType === "confirm_save_outcome" && draftAI) {
-      setConfirmOpen(true);
-      return;
-    }
-
-    if (value) {
-      await sendWithValue(value);
-    }
+    if (val) await sendVal(val);
   }
 
-  const lastTableMsg = useMemo(() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role === "ai" && messages[i].table) return messages[i];
-    }
-    return null;
-  }, [messages]);
+  const lastT = useMemo(() => { for (let i=messages.length-1;i>=0;i--) { if (messages[i].role==="ai"&&messages[i].table) return messages[i]; } return null; }, [messages]);
+  const lastC = useMemo(() => { for (let i=messages.length-1;i>=0;i--) { if (messages[i].role==="ai"&&messages[i].chart?.series) return messages[i]; } return null; }, [messages]);
+  const lastI = useMemo(() => { for (let i=messages.length-1;i>=0;i--) { if (messages[i].role==="ai"&&messages[i].image?.src) return messages[i]; } return null; }, [messages]);
 
-  const lastChartMsg = useMemo(() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role === "ai" && messages[i].chart?.series)
-        return messages[i];
-    }
-    return null;
-  }, [messages]);
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    const native = e.nativeEvent as any;
+    if (native?.isComposing) return;
+    if (e.key === "Enter") sendVal(text);
+  }
 
-  const lastImageMsg = useMemo(() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role === "ai" && messages[i].image?.src)
-        return messages[i];
-    }
-    return null;
-  }, [messages]);
+  const colorScheme = isDark ? "dark" : "light";
 
   return (
-    <div className="flex h-screen flex-col bg-background">
-      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <DialogContent className="sm:max-w-[560px]">
+    <div className="flex flex-col h-screen bg-slate-50 dark:bg-slate-950 transition-colors duration-300">
+
+      {/* ── Design Dialog ── */}
+      <Dialog open={dlgOpen} onOpenChange={open => { if (dlgGen) return; setDlgOpen(open); }}>
+        <DialogContent className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl">
           <DialogHeader>
-            <DialogTitle>
-              {draftKind === "income"
-                ? "Confirm Income Save"
-                : "Confirm Outcome Save"}
+            <DialogTitle className="text-slate-800 dark:text-slate-100 font-bold">
+              Select {pendKind === "income" ? "Income" : "Outcome"} Design
             </DialogTitle>
-            <DialogDescription>
-              {draftKind === "income"
-                ? "Company / Month / Date မပါရင် ဒီမှာရွေးပြီး Save လုပ်ပါ ✅"
-                : "Bank / Date မပါရင် ဒီမှာရွေးပြီး Save လုပ်ပါ ✅"}
+            <DialogDescription className="text-slate-400">Design ရွေးပြီးမှ generate ✅</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-3">
+              <div className="text-[10px] font-black uppercase tracking-widest text-violet-500 mb-1">Prompt</div>
+              <div className="text-sm text-slate-500 dark:text-slate-400">{pendPrompt || "—"}</div>
+            </div>
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-widest text-violet-500 mb-1.5">Design Style</div>
+              <select className={dlgSelectCls} value={selDesign} onChange={e => setSelDesign(e.target.value)}>
+                {dlgOpts.map(d => <option key={d} value={d}>{d}</option>)}
+              </select>
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <button onClick={() => setDlgOpen(false)} disabled={dlgGen} className="px-4 py-2 rounded-xl text-sm font-semibold border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">Cancel</button>
+            <button onClick={genDesign} disabled={dlgGen || !selDesign} className="px-4 py-2 rounded-xl text-sm font-semibold bg-gradient-to-r from-violet-600 to-cyan-500 text-white hover:opacity-90 disabled:opacity-40 transition-opacity shadow-lg shadow-violet-500/30">
+              {dlgGen ? "Generating…" : "Generate ✨"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Remittance Confirm Dialog ── */}
+      <Dialog open={remitOpen} onOpenChange={setRemitOpen}>
+        <DialogContent className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-slate-800 dark:text-slate-100 font-bold">
+              Confirm Remittance
+            </DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Japan → Myanmar ငွေလွှဲစာရင်းကို စစ်ပြီး Save လုပ်ပါ။
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-3">
-            <div className="rounded-2xl border bg-muted/30 p-3 text-sm">
-              <div className="font-semibold">Draft</div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <div className="text-[10px] font-black uppercase tracking-widest text-violet-500 mb-1.5">Date</div>
+                <input className={dlgInputCls} type="date" value={rDate} onChange={e => setRDate(e.target.value)} style={{ colorScheme }} />
+              </div>
+              <div>
+                <div className="text-[10px] font-black uppercase tracking-widest text-violet-500 mb-1.5">Status</div>
+                <select className={dlgSelectCls} value={rStatus} onChange={e => setRStatus(e.target.value as RemittanceStatus)}>
+                  <option value="pending">pending</option>
+                  <option value="paid">paid</option>
+                  <option value="cancelled">cancelled</option>
+                </select>
+              </div>
+            </div>
 
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-widest text-violet-500 mb-1.5">Japan Customer</div>
+              <input className={dlgInputCls} value={rCustomer} onChange={e => setRCustomer(e.target.value)} placeholder="Mg Mg" />
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <div className="text-[10px] font-black uppercase tracking-widest text-violet-500 mb-1.5">Myanmar Receiver</div>
+                <input className={dlgInputCls} value={rReceiver} onChange={e => setRReceiver(e.target.value)} placeholder="Aye Aye" />
+              </div>
+              <div>
+                <div className="text-[10px] font-black uppercase tracking-widest text-violet-500 mb-1.5">Phone</div>
+                <input className={dlgInputCls} value={rPhone} onChange={e => setRPhone(e.target.value)} placeholder="09..." />
+              </div>
+            </div>
+
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-widest text-violet-500 mb-1.5">Payout Method</div>
+              <select className={dlgSelectCls} value={rMethod} onChange={e => setRMethod(e.target.value)}>
+                {["KBZ Pay", "Wave Pay", "AYA Pay", "CB Bank", "KBZ Bank", "Cash Pickup"].map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div>
+                <div className="text-[10px] font-black uppercase tracking-widest text-violet-500 mb-1.5">JPY</div>
+                <input className={dlgInputCls} value={rYen} onChange={e => setRYen(e.target.value)} placeholder="100000" />
+              </div>
+              <div>
+                <div className="text-[10px] font-black uppercase tracking-widest text-violet-500 mb-1.5">Rate</div>
+                <input className={dlgInputCls} value={rRate} onChange={e => setRRate(e.target.value)} placeholder="22" />
+              </div>
+              <div>
+                <div className="text-[10px] font-black uppercase tracking-widest text-violet-500 mb-1.5">Fee</div>
+                <input className={dlgInputCls} value={rFee} onChange={e => setRFee(e.target.value)} placeholder="500" />
+              </div>
+            </div>
+
+            <div className="rounded-xl bg-cyan-50 dark:bg-cyan-950/30 border border-cyan-200 dark:border-cyan-900 px-3 py-2 text-sm">
+              <span className="text-slate-400">Myanmar payout: </span>
+              <span className="font-black text-cyan-700 dark:text-cyan-300">{mmk(Number(rYen) * Number(rRate))}</span>
+            </div>
+
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-widest text-violet-500 mb-1.5">Note</div>
+              <input className={dlgInputCls} value={rNote} onChange={e => setRNote(e.target.value)} placeholder="transaction note" />
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <button onClick={() => { setRemitOpen(false); setRemitDraft(null); }} disabled={confirmLoading} className="px-4 py-2 rounded-xl text-sm font-semibold border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">Cancel</button>
+            <button onClick={onSaveRemittance} disabled={confirmLoading} className="px-4 py-2 rounded-xl text-sm font-semibold bg-gradient-to-r from-violet-600 to-cyan-500 text-white hover:opacity-90 disabled:opacity-40 transition-opacity shadow-lg shadow-violet-500/30">
+              {confirmLoading ? "Saving…" : "Save Remittance"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Confirm Dialog ── */}
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-slate-800 dark:text-slate-100 font-bold">
+              {draftKind === "income" ? "Confirm Income" : "Confirm Outcome"}
+            </DialogTitle>
+            <DialogDescription className="text-slate-400">
+              {draftKind === "income" ? "Company / Month / Date စစ်ဆေး ✅" : "Bank / Date စစ်ဆေး ✅"}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-3 space-y-1.5">
+              <div className="text-[10px] font-black uppercase tracking-widest text-violet-500 mb-2">Draft</div>
               {draftKind === "income" ? (
-                <div className="mt-2 grid gap-1 text-muted-foreground">
-                  <div>
-                    Company:{" "}
-                    <span className="font-semibold text-foreground">
-                      {String(
-                        getPayload(draftAI)?.company ??
-                          getPayload(draftAI)?.compamy ??
-                          draftAI?.company ??
-                          draftAI?.compamy ??
-                          "—"
-                      )}
-                    </span>
-                  </div>
-                  <div>
-                    Amount:{" "}
-                    <span className="font-semibold text-foreground">
-                      {String(
-                        getPayload(draftAI)?.amount ?? draftAI?.amount ?? "—"
-                      )}
-                    </span>
-                  </div>
-                  <div>
-                    Notice:{" "}
-                    <span className="font-semibold text-foreground">
-                      {String(
-                        getPayload(draftAI)?.notice ?? draftAI?.notice ?? "—"
-                      )}
-                    </span>
-                  </div>
-                </div>
+                <>
+                  <div className="text-xs text-slate-400">Company: <span className="font-semibold text-slate-700 dark:text-slate-200">{String(getPayload(draftAI)?.company ?? getPayload(draftAI)?.compamy ?? draftAI?.company ?? draftAI?.compamy ?? "—")}</span></div>
+                  <div className="text-xs text-slate-400">Amount: <span className="font-bold font-mono text-emerald-500">{String(getPayload(draftAI)?.amount ?? draftAI?.amount ?? "—")}</span></div>
+                  <div className="text-xs text-slate-400">Notice: <span className="font-semibold text-slate-700 dark:text-slate-200">{String(getPayload(draftAI)?.notice ?? draftAI?.notice ?? "—")}</span></div>
+                </>
               ) : (
-                <div className="mt-2 grid gap-1 text-muted-foreground">
-                  <div>
-                    Shop:{" "}
-                    <span className="font-semibold text-foreground">
-                      {String(
-                        getPayload(draftAI)?.shop ?? draftAI?.shop ?? "—"
-                      )}
-                    </span>
-                  </div>
-                  <div>
-                    Amount:{" "}
-                    <span className="font-semibold text-foreground">
-                      {String(
-                        getPayload(draftAI)?.amount ?? draftAI?.amount ?? "—"
-                      )}
-                    </span>
-                  </div>
-                  <div>
-                    Notice:{" "}
-                    <span className="font-semibold text-foreground">
-                      {String(
-                        getPayload(draftAI)?.notice ?? draftAI?.notice ?? "—"
-                      )}
-                    </span>
-                  </div>
-                </div>
+                <>
+                  <div className="text-xs text-slate-400">Shop: <span className="font-semibold text-slate-700 dark:text-slate-200">{String(getPayload(draftAI)?.shop ?? draftAI?.shop ?? "—")}</span></div>
+                  <div className="text-xs text-slate-400">Amount: <span className="font-bold font-mono text-rose-500">{String(getPayload(draftAI)?.amount ?? draftAI?.amount ?? "—")}</span></div>
+                  <div className="text-xs text-slate-400">Notice: <span className="font-semibold text-slate-700 dark:text-slate-200">{String(getPayload(draftAI)?.notice ?? draftAI?.notice ?? "—")}</span></div>
+                </>
               )}
             </div>
 
             {draftKind === "income" ? (
               <>
-                <div className="space-y-1">
-                  <div className="text-xs font-semibold text-muted-foreground">
-                    Company
-                  </div>
-                  <Input
-                    value={confirmCompany}
-                    onChange={(e) => setConfirmCompany(e.target.value)}
-                    placeholder="e.g. Salary / ABC Co., Ltd."
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <div className="text-xs font-semibold text-muted-foreground">
-                    Month (YYYY-MM)
-                  </div>
-                  <Input
-                    value={confirmMonth}
-                    onChange={(e) => setConfirmMonth(e.target.value)}
-                    placeholder="2026-03"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <div className="text-xs font-semibold text-muted-foreground">
-                    Date
-                  </div>
-                  <Input
-                    type="date"
-                    value={confirmDate}
-                    onChange={(e) => setConfirmDate(e.target.value)}
-                  />
-                </div>
+                <div><div className="text-[10px] font-black uppercase tracking-widest text-violet-500 mb-1.5">Company</div><input className={dlgInputCls} value={cCompany} onChange={e => setCCompany(e.target.value)} placeholder="Salary / ABC Co., Ltd." /></div>
+                <div><div className="text-[10px] font-black uppercase tracking-widest text-violet-500 mb-1.5">Month (YYYY-MM)</div><input className={dlgInputCls} value={cMonth} onChange={e => setCMonth(e.target.value)} placeholder="2026-03" /></div>
+                <div><div className="text-[10px] font-black uppercase tracking-widest text-violet-500 mb-1.5">Date</div><input className={dlgInputCls} type="date" value={cDate} onChange={e => setCDate(e.target.value)} style={{ colorScheme }} /></div>
               </>
             ) : (
               <>
-                <div className="space-y-1">
-                  <div className="text-xs font-semibold text-muted-foreground">
-                    Bank
-                  </div>
-                  <select
-                    className="h-10 w-full rounded-xl border bg-background px-3 text-sm"
-                    value={confirmBank}
-                    onChange={(e) => setConfirmBank(e.target.value)}
-                  >
-                    {bankSuggestions.map((b) => (
-                      <option key={b} value={b}>
-                        {b}
-                      </option>
-                    ))}
+                <div>
+                  <div className="text-[10px] font-black uppercase tracking-widest text-violet-500 mb-1.5">Bank</div>
+                  <select className={dlgSelectCls} value={cBank} onChange={e => setCBank(e.target.value)}>
+                    {bankSugg.map(b => <option key={b} value={b}>{b}</option>)}
                   </select>
                 </div>
-
-                <div className="space-y-1">
-                  <div className="text-xs font-semibold text-muted-foreground">
-                    Date
-                  </div>
-                  <Input
-                    type="date"
-                    value={confirmDate}
-                    onChange={(e) => setConfirmDate(e.target.value)}
-                  />
-                  <div className="text-[11px] text-muted-foreground">
-                    Calendar က auto ပေါ်လာပြီး ရွေးလို့ရပါတယ် ✅
-                  </div>
-                </div>
+                <div><div className="text-[10px] font-black uppercase tracking-widest text-violet-500 mb-1.5">Date</div><input className={dlgInputCls} type="date" value={cDate} onChange={e => setCDate(e.target.value)} style={{ colorScheme }} /></div>
               </>
             )}
           </div>
-
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button
-              variant="outline"
-              onClick={() => {
-                setConfirmOpen(false);
-                setDraftAI(null);
-              }}
-              disabled={confirmLoading}
-            >
-              Cancel
-            </Button>
-            <Button onClick={onConfirmSave} disabled={confirmLoading}>
-              {confirmLoading ? "Saving..." : "Save ✅"}
-            </Button>
+          <DialogFooter className="gap-2">
+            <button onClick={() => { setConfirmOpen(false); setDraftAI(null); }} disabled={confirmLoading} className="px-4 py-2 rounded-xl text-sm font-semibold border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">Cancel</button>
+            <button onClick={onSave} disabled={confirmLoading} className="px-4 py-2 rounded-xl text-sm font-semibold bg-gradient-to-r from-violet-600 to-cyan-500 text-white hover:opacity-90 disabled:opacity-40 transition-opacity shadow-lg shadow-violet-500/30">
+              {confirmLoading ? "Saving…" : "Save ✅"}
+            </button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <div className="w-full flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-5xl px-4 py-6">
-          <div className="mb-4 flex flex-wrap gap-2">
-            {quickQA.map((q) => (
-              <Button
-                key={q}
-                variant="outline"
-                size="sm"
-                onClick={() => sendWithValue(q)}
-                disabled={loading}
-              >
-                {q}
-              </Button>
-            ))}
+      {/* ── Header ── */}
+      <header className="relative z-10 flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800 bg-white/90 dark:bg-slate-950/90 backdrop-blur-md">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-violet-600 to-cyan-500 flex items-center justify-center shadow-lg shadow-violet-500/30">
+            <Bot size={16} className="text-white" />
           </div>
+          <span className="font-black text-sm tracking-tight text-slate-800 dark:text-slate-100">Finance AI</span>
+          <span className="text-[9px] font-black uppercase tracking-widest text-cyan-500 bg-cyan-50 dark:bg-cyan-900/30 border border-cyan-200 dark:border-cyan-800 px-2 py-0.5 rounded-full">BETA</span>
+        </div>
+        <button
+          onClick={() => setIsDark(d => !d)}
+          className="w-9 h-9 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 flex items-center justify-center text-slate-500 hover:text-violet-600 hover:border-violet-400 transition-colors"
+        >
+          {isDark ? <Sun size={15} /> : <Moon size={15} />}
+        </button>
+      </header>
 
-          {messages.map((m) => (
-            <div key={m.id} className="mb-5 w-full">
+      {/* ── Messages ── */}
+      <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-200 dark:scrollbar-thumb-slate-700">
+        <div className="max-w-3xl mx-auto px-4 py-6 space-y-5">
+
+          {/* Welcome */}
+          {messages.length === 0 && (
+            <div className="text-center py-16 space-y-4">
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-600 to-cyan-500 flex items-center justify-center mx-auto shadow-xl shadow-violet-500/25">
+                <Bot size={28} className="text-white" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-black tracking-tight text-slate-800 dark:text-slate-100">
+                  Finance{" "}
+                  <span className="bg-gradient-to-r from-violet-600 to-cyan-500 bg-clip-text text-transparent">AI</span>
+                </h1>
+                <p className="text-sm text-slate-400 mt-2 max-w-sm mx-auto leading-relaxed">
+                  Outcome / Income / ငွေလွှဲစာရင်း output — chat ထဲမှာ တစ်ခါတည်း
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2 justify-center pt-2">
+                {["Lawson 980 snack", "salary 300000", "KBZ Pay MMK total", "pending ငွေလွှဲ ဘယ်နှစ်ခု"].map(h => (
+                  <button key={h} onClick={() => sendVal(h)} className="px-4 py-2 rounded-full text-sm font-medium border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:border-violet-400 hover:text-violet-600 dark:hover:text-violet-400 transition-colors">
+                    {h}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Messages */}
+          {messages.map(m => (
+            <div key={m.id} className="w-full">
               {m.role === "user" ? (
-                <div className="ml-auto flex max-w-[92%] items-start justify-end gap-3 sm:max-w-[80%]">
-                  <div className="whitespace-pre-wrap rounded-3xl bg-primary px-4 py-3 text-sm leading-6 text-primary-foreground shadow-sm">
+                <div className="flex items-end justify-end gap-2">
+                  <div className="max-w-[76%] px-4 py-3 rounded-2xl rounded-br-sm bg-gradient-to-br from-violet-600 to-violet-700 text-white text-sm leading-relaxed font-medium shadow-lg shadow-violet-500/20 whitespace-pre-wrap break-words">
                     {m.text}
                   </div>
                   <UserAvatar />
                 </div>
               ) : (
-                <div className="flex w-full items-start gap-3">
+                <div className="flex items-start gap-2 w-full">
                   <AIAvatar />
-
-                  <div className="min-w-0 max-w-[92%] sm:max-w-[80%]">
-                    {m.lines ? (
-                      <PrettyLinesBubble
-                        lines={m.lines}
-                        streaming={m.streaming}
-                        done={m.done}
-                      />
-                    ) : (
-                      <div className="whitespace-pre-wrap rounded-3xl border bg-muted/50 px-4 py-3 text-sm leading-6 shadow-sm">
-                        {m.text}
-                        {m.streaming ? (
-                          <span className="ml-1 inline-block w-2 animate-pulse">
-                            ▍
-                          </span>
-                        ) : null}
-                      </div>
-                    )}
+                  <div className="min-w-0 flex-1 max-w-[87%] space-y-2">
+                    {m.lines
+                      ? <LinesBubble lines={m.lines} streaming={m.streaming} done={m.done} />
+                      : (
+                        <div className="relative rounded-2xl rounded-tl-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 px-4 py-3 shadow-sm text-sm text-slate-600 dark:text-slate-300 leading-relaxed overflow-hidden">
+                          <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-violet-500 via-cyan-400 to-transparent opacity-50" />
+                          {m.text}
+                          {m.streaming && <span className="inline-block w-0.5 h-3.5 ml-0.5 align-middle bg-violet-500 rounded-sm animate-pulse" />}
+                        </div>
+                      )}
 
                     {m.cards?.length ? <CardsRow cards={m.cards} /> : null}
 
                     {m.actions?.length ? (
-                      <div className="mt-3 flex flex-wrap gap-2">
+                      <div className="flex flex-wrap gap-2 pt-1">
                         {m.actions.map((a, i) => (
-                          <Button
-                            key={`${a.label}-${i}`}
-                            variant="outline"
-                            size="sm"
-                            onClick={() => onActionClick(a)}
-                          >
+                          <button key={`${a.label}-${i}`} onClick={() => onAct(a)}
+                            className="px-3 py-1.5 rounded-full text-xs font-semibold border border-violet-300 dark:border-violet-700 text-violet-600 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/30 transition-colors">
                             {a.label || "Action"}
-                          </Button>
+                          </button>
                         ))}
                       </div>
                     ) : null}
 
-                    {m.role === "ai" && m.table && m.id === lastTableMsg?.id ? (
-                      m.table.kind === "income" ? (
-                        <IncomesTableCard
-                          title={m.table.title ?? ""}
-                          rows={Array.isArray(m.table.rows) ? m.table.rows : []}
-                        />
-                      ) : (
-                        <OutcomesTableCard
-                          title={m.table.title ?? ""}
-                          rows={Array.isArray(m.table.rows) ? m.table.rows : []}
-                        />
-                      )
-                    ) : null}
+                    {m.role==="ai" && m.table && m.id===lastT?.id && (
+                      <TableCard title={m.table.title ?? ""} rows={Array.isArray(m.table.rows) ? m.table.rows : []} kind={m.table.kind ?? "outcome"} />
+                    )}
 
-                    {m.role === "ai" &&
-                    m.chart?.series &&
-                    m.id === lastChartMsg?.id ? (
-                      <ChartCard
-                        title={
-                          m.chart.kind === "income"
-                            ? "Income Charts"
-                            : "Outcome Charts"
-                        }
-                      >
-                        {m.chart.kind === "income" ? (
-                          <IncomeChartsCard
-                            series={{
-                              trend: m.chart.series.trend ?? [],
-                              byCompany:
-                                (m.chart.series as any).byCompany ?? [],
-                            }}
-                          />
-                        ) : (
-                          <OutcomeChartsCard series={m.chart.series as any} />
-                        )}
-                      </ChartCard>
-                    ) : null}
+                    {m.role==="ai" && m.remittance && (
+                      <RemittanceCard data={m.remittance} />
+                    )}
 
-                    {m.role === "ai" &&
-                    m.image?.src &&
-                    m.id === lastImageMsg?.id ? (
-                      <ImageCard
-                        title={m.image.title}
-                        src={m.image.src}
-                        kind={m.image.kind}
-                        poster={m.image.poster}
-                      />
-                    ) : null}
+                    {m.role==="ai" && m.chart?.series && m.id===lastC?.id && (
+                      <div className="mt-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
+                        <div className="border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/80 px-4 py-3 flex items-center gap-2.5">
+                          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-600 to-cyan-500 flex items-center justify-center shadow-md shadow-violet-500/20">
+                            <TrendingUp size={13} className="text-white" />
+                          </div>
+                          <div>
+                            <div className="text-[10px] font-black uppercase tracking-widest text-violet-500">{m.chart.kind === "income" ? "Income Charts" : "Outcome Charts"}</div>
+                            <div className="text-xs text-slate-400 mt-0.5">Trend / Breakdown ✅</div>
+                          </div>
+                        </div>
+                        <div className="p-4">
+                          {m.chart.kind === "income"
+                            ? <IncomeChartsCard series={{ trend: m.chart.series.trend ?? [], byCompany: (m.chart.series as any).byCompany ?? [] }} />
+                            : <OutcomeChartsCard series={m.chart.series as any} />}
+                        </div>
+                      </div>
+                    )}
 
-                    {m.role === "ai" && m.report ? (
-                      <ReportCard
-                        report={m.report}
-                        title={
-                          m.reportKind === "income"
-                            ? "Income Report"
-                            : m.reportKind === "outcome"
-                            ? "Outcome Report"
-                            : "Report"
-                        }
-                      />
-                    ) : null}
+                    {m.role==="ai" && m.image?.src && m.id===lastI?.id && (
+                      <ImageCard title={m.image.title} src={m.image.src} kind={m.image.kind} poster={m.image.poster} />
+                    )}
+
+                    {m.role==="ai" && m.report && (
+                      <ReportCard report={m.report} title={m.reportKind==="income" ? "Income Report" : m.reportKind==="outcome" ? "Outcome Report" : "Report"} />
+                    )}
                   </div>
                 </div>
               )}
             </div>
           ))}
 
+          {/* Thinking */}
           {loading && (
-            <div className="text-xs text-muted-foreground">AI thinking…</div>
+            <div className="flex items-center gap-2 pl-11">
+              <div className="flex gap-1 items-center">
+                {[0,1,2].map(i => (
+                  <span key={i} className="w-2 h-2 rounded-full bg-violet-500 animate-bounce" style={{ animationDelay: (i*0.15) + "s" }} />
+                ))}
+              </div>
+              <span className="text-xs text-slate-400">AI thinking…</span>
+            </div>
           )}
+
           <div ref={bottomRef} />
         </div>
       </div>
 
-      <div className="border-t bg-background/80 p-3 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="mx-auto flex max-w-5xl gap-2">
-          <Input
+      {/* ── Input Bar ── */}
+      <div className="relative z-10 border-t border-slate-200 dark:border-slate-800 bg-white/90 dark:bg-slate-950/90 backdrop-blur-md px-4 py-3">
+        <div className="max-w-3xl mx-auto flex gap-2">
+          <input
             value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder='Try: "Lawson 980 snack" / "ဒီလ outcome chart ပြ" / "poster: Title | Subtitle | bullet1, bullet2" / "joke တစ်ခု ပြောပေး" / "motivation ပေး" / "python quiz တစ်ခု ပေး" / "BINHLAIG project idea ပေး"'
-            onKeyDown={(e) => {
-              // @ts-ignore
-              if (e.nativeEvent?.isComposing) return;
-              if (e.key === "Enter") send();
-            }}
+            onChange={e => setText(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder='Try: "Lawson 980"  ·  "salary 300000"  ·  "KBZ Pay MMK total"  ·  "pending ငွေလွှဲ ဘယ်နှစ်ခု"'
+            className="flex-1 px-4 py-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent transition"
           />
-
-          <Button onClick={send} disabled={loading}>
-            <Send className="h-4 w-4" />
-          </Button>
+          <button
+            onClick={() => sendVal(text)}
+            disabled={loading}
+            className="w-12 h-12 rounded-2xl bg-gradient-to-br from-violet-600 to-cyan-500 flex items-center justify-center text-white shadow-lg shadow-violet-500/30 hover:scale-105 hover:shadow-violet-500/50 active:scale-95 disabled:opacity-40 transition-all duration-150"
+          >
+            <Send size={16} />
+          </button>
         </div>
       </div>
     </div>
   );
 }
-
-
-
-                // "use client";
-
-                // import React, { useEffect, useMemo, useRef, useState } from "react";
-                // import {
-                //   Send,
-                //   ChevronLeft,
-                //   ChevronRight,
-                //   CheckCircle2,
-                //   Sparkles,
-                // } from "lucide-react";
-
-                // import { Button } from "@/components/ui/button";
-                // import { Input } from "@/components/ui/input";
-
-                // // Table
-                // import {
-                //   Table,
-                //   TableBody,
-                //   TableCell,
-                //   TableHead,
-                //   TableHeader,
-                //   TableRow,
-                // } from "@/components/ui/table";
-
-                // // Dialog
-                // import {
-                //   Dialog,
-                //   DialogContent,
-                //   DialogHeader,
-                //   DialogTitle,
-                //   DialogDescription,
-                //   DialogFooter,
-                // } from "@/components/ui/dialog";
-
-                // // Charts
-                // import {
-                //   ResponsiveContainer,
-                //   LineChart,
-                //   Line,
-                //   XAxis,
-                //   YAxis,
-                //   Tooltip,
-                //   CartesianGrid,
-                //   BarChart,
-                //   Bar,
-                // } from "recharts";
-                // import OutcomeChartsCard from "@/components/ai/OtcomeChartpage";
-
-                // type Mode = "outcome" | "income";
-                // type DetectKind = Mode | "mixed";
-
-                // type PosterMeta = {
-                //   size?: string | null;
-                //   title?: string | null;
-                //   subtitle?: string | null;
-                //   bullets?: string[] | null;
-                //   footer?: string | null;
-                //   theme?: string | null;
-                //   style?: string | null;
-                // };
-
-                // type AICard = {
-                //   label?: string;
-                //   value?: any;
-                // };
-
-                // type AIAction = {
-                //   type?: string;
-                //   label?: string;
-                //   value?: string;
-                //   field?: string;
-                // };
-
-                // type Msg = {
-                //   id: string;
-                //   role: "user" | "ai";
-                //   text: string;
-                //   lines?: string[];
-                //   streaming?: boolean;
-                //   done?: boolean;
-
-                //   cards?: AICard[];
-                //   actions?: AIAction[];
-
-                //   table?: { title?: string; rows: any[]; kind?: Mode };
-                //   report?: any;
-                //   reportKind?: Mode | "mixed";
-                //   chart?: {
-                //     series?: {
-                //       trend?: { x: string; y: number }[];
-                //       byShop?: { name: string; value: number }[];
-                //       byCategory?: { name: string; value: number }[];
-                //       byBank?: { name: string; value: number }[];
-                //       byCompany?: { name: string; value: number }[];
-                //     };
-                //     filters?: any;
-                //     kind?: Mode;
-                //   };
-                //   image?: {
-                //     src: string;
-                //     title?: string;
-                //     kind?: Mode | "mixed";
-                //     poster?: PosterMeta | null;
-                //   };
-                // };
-
-                // type AIResult = any;
-
-                // // helpers
-                // function uid() {
-                //   return typeof crypto !== "undefined" && "randomUUID" in crypto
-                //     ? crypto.randomUUID()
-                //     : Math.random().toString(16).slice(2);
-                // }
-
-                // function getPayload(ai: any) {
-                //   return ai?.payload ?? ai;
-                // }
-
-                // function getAssistant(ai: any) {
-                //   return ai?.assistant ?? null;
-                // }
-
-                // function toISODate(v: any): string {
-                //   if (!v) return "";
-                //   const raw = v?.$date ?? v;
-                //   const d = raw instanceof Date ? raw : new Date(raw);
-                //   if (Number.isNaN(d.getTime())) return "";
-                //   const y = d.getFullYear();
-                //   const m = String(d.getMonth() + 1).padStart(2, "0");
-                //   const day = String(d.getDate()).padStart(2, "0");
-                //   return `${y}-${m}-${day}`;
-                // }
-
-                // function toNumber(v: any): number | null {
-                //   if (v === null || v === undefined) return null;
-                //   const n = Number(String(v).replace(/[^\d.-]/g, ""));
-                //   return Number.isFinite(n) ? n : null;
-                // }
-
-                // function yen(v: any): string {
-                //   const n = toNumber(v);
-                //   if (n === null) return v ? `¥${String(v)}` : "—";
-                //   return `¥${n.toLocaleString()}`;
-                // }
-
-                // function cellText(v: any): string {
-                //   if (v === null || v === undefined) return "—";
-                //   const s = String(v).trim();
-                //   return s ? s : "—";
-                // }
-
-                // function csvEscape(s: string) {
-                //   const t = s.replace(/"/g, '""');
-                //   return `"${t}"`;
-                // }
-
-                // function exportOutcomesCSV(rows: any[], filename = "outcomes.csv") {
-                //   const headers = ["date", "shop", "bank", "amount", "notice"];
-                //   const lines: string[] = [];
-                //   lines.push(headers.join(","));
-
-                //   for (const r of rows) {
-                //     const date = toISODate(r?.date) || toISODate(r?.createdAt);
-                //     const shop = String(r?.shop ?? "");
-                //     const bank = String(r?.bank ?? "");
-                //     const amount = String(r?.amount ?? "");
-                //     const notice = String(r?.notice ?? "");
-
-                //     lines.push(
-                //       [
-                //         csvEscape(date),
-                //         csvEscape(shop),
-                //         csvEscape(bank),
-                //         csvEscape(amount),
-                //         csvEscape(notice),
-                //       ].join(",")
-                //     );
-                //   }
-
-                //   const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
-                //   const url = URL.createObjectURL(blob);
-                //   const a = document.createElement("a");
-                //   a.href = url;
-                //   a.download = filename;
-                //   document.body.appendChild(a);
-                //   a.click();
-                //   a.remove();
-                //   URL.revokeObjectURL(url);
-                // }
-
-                // function exportIncomesCSV(rows: any[], filename = "incomes.csv") {
-                //   const headers = ["date", "company", "month", "amount", "notice"];
-                //   const lines: string[] = [];
-                //   lines.push(headers.join(","));
-
-                //   for (const r of rows) {
-                //     const date = toISODate(r?.date) || toISODate(r?.createdAt);
-                //     const company = String(r?.company ?? r?.compamy ?? "");
-                //     const month = String(r?.month ?? "");
-                //     const amount = String(r?.amount ?? "");
-                //     const notice = String(r?.notice ?? "");
-
-                //     lines.push(
-                //       [
-                //         csvEscape(date),
-                //         csvEscape(company),
-                //         csvEscape(month),
-                //         csvEscape(amount),
-                //         csvEscape(notice),
-                //       ].join(",")
-                //     );
-                //   }
-
-                //   const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
-                //   const url = URL.createObjectURL(blob);
-                //   const a = document.createElement("a");
-                //   a.href = url;
-                //   a.download = filename;
-                //   document.body.appendChild(a);
-                //   a.click();
-                //   a.remove();
-                //   URL.revokeObjectURL(url);
-                // }
-
-                // function parseItemsFromAnswer(answer: string): any[] {
-                //   const lines = (answer ?? "")
-                //     .split("\n")
-                //     .map((s) => s.trim())
-                //     .filter(Boolean);
-
-                //   const rows: any[] = [];
-                //   for (const line of lines) {
-                //     const m = line.match(
-                //       /^\d+\.\s*(.+?)\s+¥\s*([\d,]+)(?:\s+\[(.*?)\])?(?:\s+(.*))?$/i
-                //     );
-                //     if (!m) continue;
-
-                //     rows.push({
-                //       date: "",
-                //       shop: (m[1] ?? "").trim(),
-                //       amount: (m[2] ?? "").replace(/,/g, ""),
-                //       category: (m[3] ?? "").trim() || "-",
-                //       notice: (m[4] ?? "").trim() || "",
-                //       bank: "",
-                //     });
-                //   }
-                //   return rows;
-                // }
-
-                // function pickLines(ai: any): string[] {
-                //   const assistant = getAssistant(ai);
-                //   const payload = getPayload(ai);
-
-                //   const lines =
-                //     (Array.isArray(assistant?.lines) ? assistant.lines : null) ??
-                //     (Array.isArray(payload?.answer_lines) ? payload.answer_lines : null) ??
-                //     (Array.isArray(ai?.answer_lines) ? ai.answer_lines : null) ??
-                //     [];
-
-                //   return Array.isArray(lines) ? lines.map(String).filter(Boolean) : [];
-                // }
-
-                // function pickCards(ai: any): AICard[] {
-                //   const assistant = getAssistant(ai);
-                //   const cards = Array.isArray(assistant?.cards) ? assistant.cards : [];
-                //   return cards.map((c: any) => ({
-                //     label: typeof c?.label === "string" ? c.label : "",
-                //     value: c?.value,
-                //   }));
-                // }
-
-                // function pickActions(ai: any): AIAction[] {
-                //   const assistant = getAssistant(ai);
-                //   const actions = Array.isArray(assistant?.actions) ? assistant.actions : [];
-                //   return actions.map((a: any) => ({
-                //     type: typeof a?.type === "string" ? a.type : "",
-                //     label: typeof a?.label === "string" ? a.label : "",
-                //     value: typeof a?.value === "string" ? a.value : "",
-                //     field: typeof a?.field === "string" ? a.field : "",
-                //   }));
-                // }
-
-                // function pickAnswerText(ai: any): string {
-                //   const assistant = getAssistant(ai);
-                //   const payload = getPayload(ai);
-                //   return String(
-                //     assistant?.message ?? ai?.answer ?? payload?.answer ?? ai?.message ?? "OK"
-                //   );
-                // }
-
-                // function pickChartSeries(ai: any) {
-                //   const payload = getPayload(ai);
-
-                //   const s =
-                //     payload?.series ??
-                //     payload?.chart?.series ??
-                //     ai?.series ??
-                //     ai?.chart?.series ??
-                //     null;
-
-                //   const series = {
-                //     trend: Array.isArray(s?.trend) ? s.trend : [],
-                //     byShop: Array.isArray(s?.byShop) ? s.byShop : [],
-                //     byCategory: Array.isArray(s?.byCategory) ? s.byCategory : [],
-                //     byBank: Array.isArray(s?.byBank) ? s.byBank : [],
-                //     byCompany: Array.isArray(s?.byCompany)
-                //       ? s.byCompany
-                //       : Array.isArray(s?.byShop)
-                //       ? s.byShop
-                //       : [],
-                //   };
-
-                //   const filters =
-                //     payload?.filters ??
-                //     payload?.chart?.filters ??
-                //     ai?.filters ??
-                //     ai?.chart?.filters ??
-                //     null;
-
-                //   return { series, filters };
-                // }
-
-                // function pickImage(ai: any): { src: string; title?: string } | null {
-                //   const payload = getPayload(ai);
-                //   const img = payload?.image ?? ai?.image ?? null;
-
-                //   const src =
-                //     typeof img?.data_url === "string" && img.data_url.startsWith("data:image/")
-                //       ? img.data_url
-                //       : null;
-
-                //   if (!src) return null;
-
-                //   return {
-                //     src,
-                //     title: typeof img?.title === "string" ? img.title : undefined,
-                //   };
-                // }
-
-                // function pickPoster(ai: any): PosterMeta | null {
-                //   const payload = getPayload(ai);
-                //   const poster = payload?.poster ?? ai?.poster ?? null;
-
-                //   if (!poster || typeof poster !== "object") return null;
-
-                //   return {
-                //     size: typeof poster?.size === "string" ? poster.size : null,
-                //     title: typeof poster?.title === "string" ? poster.title : null,
-                //     subtitle: typeof poster?.subtitle === "string" ? poster.subtitle : null,
-                //     bullets: Array.isArray(poster?.bullets)
-                //       ? poster.bullets.map((x: any) => String(x))
-                //       : null,
-                //     footer: typeof poster?.footer === "string" ? poster.footer : null,
-                //     theme: typeof poster?.theme === "string" ? poster.theme : null,
-                //     style: typeof poster?.style === "string" ? poster.style : null,
-                //   };
-                // }
-
-                // // unified AI routing
-                // function detectKindByText(input: string): DetectKind {
-                //   const t = (input || "").toLowerCase().trim();
-
-                //   const incomeHints = [
-                //     "income",
-                //     "incomes",
-                //     "salary",
-                //     "pay",
-                //     "wage",
-                //     "bonus",
-                //     "allowance",
-                //     "company",
-                //     "compamy",
-                //     "ဝင်ငွေ",
-                //     "လစာ",
-                //     "လုပ်ခ",
-                //     "အလုပ်လစာ",
-                //   ];
-
-                //   const outcomeHints = [
-                //     "outcome",
-                //     "outcomes",
-                //     "spend",
-                //     "expense",
-                //     "spent",
-                //     "buy",
-                //     "bought",
-                //     "shop",
-                //     "lawson",
-                //     "familymart",
-                //     "7-eleven",
-                //     "aeon",
-                //     "donki",
-                //     "don quijote",
-                //     "ကုန်ကျ",
-                //     "အသုံးစရိတ်",
-                //     "သုံး",
-                //     "ဝယ်",
-                //   ];
-
-                //   const mixedHints = [
-                //     "report",
-                //     "analysis",
-                //     "insight",
-                //     "next steps",
-                //     "poster",
-                //     "image",
-                //     "chart",
-                //     "graph",
-                //     "ai poster",
-                //     "summary",
-                //     "အကြံပြု",
-                //     "ဘာတွေလုပ်ရမလဲ",
-                //     "ပုံ",
-                //     "ပိုစတာ",
-                //     "ဓာတ်ပုံ",
-                //   ];
-
-                //   const hasIncome = incomeHints.some((k) => t.includes(k));
-                //   const hasOutcome = outcomeHints.some((k) => t.includes(k));
-                //   const hasMixed = mixedHints.some((k) => t.includes(k));
-
-                //   if (hasIncome && !hasOutcome) return "income";
-                //   if (hasOutcome && !hasIncome) return "outcome";
-                //   if (hasMixed) return "mixed";
-
-                //   return "mixed";
-                // }
-
-                // function detectKindByIntent(ai: any): Mode | "mixed" {
-                //   const payload = getPayload(ai);
-                //   const intent = String(ai?.intent ?? payload?.intent ?? "").toLowerCase();
-
-                //   if (!intent) return "mixed";
-                //   if (intent.includes("income")) return "income";
-                //   if (intent.includes("outcome")) return "outcome";
-                //   if (intent === "poster_image") return "mixed";
-                //   if (intent.includes("list_incomes") || intent.includes("charts_incomes"))
-                //     return "income";
-                //   if (intent.includes("list_outcomes") || intent.includes("charts_outcomes"))
-                //     return "outcome";
-
-                //   return "mixed";
-                // }
-
-                // function isRecognized(ai: any): boolean {
-                //   const payload = getPayload(ai);
-                //   const intent = String(ai?.intent ?? payload?.intent ?? "").toLowerCase();
-
-                //   if (!intent) return false;
-
-                //   const okIntents = [
-                //     "create_outcome",
-                //     "list_outcomes",
-                //     "charts_outcomes",
-                //     "query_outcome",
-                //     "outcome_image",
-                //     "next_steps_report",
-                //     "create_income",
-                //     "list_incomes",
-                //     "charts_incomes",
-                //     "income_image",
-                //     "income_report",
-                //     "poster_image",
-                //   ];
-                //   return okIntents.includes(intent);
-                // }
-
-                // function isBadRequestLike(error: any): boolean {
-                //   const msg = String(error?.message ?? "").toLowerCase();
-                //   return (
-                //     msg.includes("400") ||
-                //     msg.includes("bad request") ||
-                //     msg.includes("text is required") ||
-                //     msg.includes("invalid request") ||
-                //     msg.includes("unsupported")
-                //   );
-                // }
-
-                // // avatars
-                // function AIAvatar() {
-                //   return (
-                //     <div className="mt-1 grid h-10 w-10 place-items-center rounded-2xl border bg-gradient-to-br from-primary/25 to-muted shadow-sm">
-                //       <Sparkles className="h-5 w-5 text-primary" />
-                //     </div>
-                //   );
-                // }
-
-                // function UserAvatar() {
-                //   return (
-                //     <div className="mt-1 grid h-10 w-10 place-items-center rounded-2xl border bg-muted/40 shadow-sm">
-                //       <span className="text-xs font-semibold text-muted-foreground">You</span>
-                //     </div>
-                //   );
-                // }
-
-                // // pretty lines
-                // function InlineCodeText({ text }: { text: string }) {
-                //   const parts = String(text).split(/(`[^`]+`)/g);
-
-                //   return (
-                //     <>
-                //       {parts.map((p, i) => {
-                //         const isCode = p.startsWith("`") && p.endsWith("`");
-                //         if (!isCode) return <span key={i}>{p}</span>;
-                //         const code = p.slice(1, -1);
-                //         return (
-                //           <code
-                //             key={i}
-                //             className="mx-1 rounded-md border bg-background px-2 py-0.5 font-mono text-xs text-foreground"
-                //           >
-                //             {code}
-                //           </code>
-                //         );
-                //       })}
-                //     </>
-                //   );
-                // }
-
-                // function DraftingBadge({ done }: { done?: boolean }) {
-                //   return (
-                //     <div
-                //       className={[
-                //         "inline-flex items-center gap-1 rounded-full border bg-background px-2 py-0.5 text-[11px]",
-                //         done
-                //           ? "text-emerald-600 dark:text-emerald-400"
-                //           : "text-muted-foreground",
-                //       ].join(" ")}
-                //     >
-                //       {done ? (
-                //         <>
-                //           <CheckCircle2 className="h-3.5 w-3.5" />
-                //           <span>Saved</span>
-                //         </>
-                //       ) : (
-                //         <>
-                //           <Sparkles className="h-3.5 w-3.5" />
-                //           <span>Drafting…</span>
-                //         </>
-                //       )}
-                //     </div>
-                //   );
-                // }
-
-                // function DonePop() {
-                //   return (
-                //     <div className="pointer-events-none absolute right-3 top-3 animate-[pop_650ms_ease-out_1]">
-                //       <div className="flex items-center gap-1 rounded-full border bg-background px-2 py-1 text-xs text-emerald-600 dark:text-emerald-400 shadow-sm">
-                //         <CheckCircle2 className="h-4 w-4" />
-                //         Done
-                //       </div>
-                //     </div>
-                //   );
-                // }
-
-                // function PrettyLinesBubble({
-                //   lines,
-                //   streaming,
-                //   done,
-                // }: {
-                //   lines: string[];
-                //   streaming?: boolean;
-                //   done?: boolean;
-                // }) {
-                //   const safeLines = Array.isArray(lines) ? lines : [];
-
-                //   if (!safeLines?.length) {
-                //     return (
-                //       <div className="relative rounded-3xl border bg-muted/50 px-4 py-3 text-sm leading-6 shadow-sm">
-                //         <div className="flex items-center justify-between">
-                //           <div className="text-base font-semibold">AI</div>
-                //           <DraftingBadge done={false} />
-                //         </div>
-                //         <div className="mt-2 text-muted-foreground">
-                //           Writing…
-                //           <span className="ml-1 inline-block w-2 animate-pulse">▍</span>
-                //         </div>
-                //       </div>
-                //     );
-                //   }
-
-                //   const head = safeLines[0] ?? "";
-                //   const rest = safeLines.slice(1);
-                //   const isBullet = (s: string) => /^\s*[•\-*]\s+/.test(s);
-
-                //   return (
-                //     <div className="relative rounded-3xl border bg-muted/50 px-4 py-3 text-sm leading-6 shadow-sm">
-                //       <div className="flex items-center justify-between gap-3">
-                //         <div className="text-base font-semibold">
-                //           <InlineCodeText text={head} />
-                //         </div>
-
-                //         <div className="flex items-center gap-2">
-                //           <DraftingBadge done={done} />
-                //           {streaming ? (
-                //             <span className="inline-block w-2 animate-pulse text-muted-foreground">
-                //               ▍
-                //             </span>
-                //           ) : null}
-                //         </div>
-                //       </div>
-
-                //       {!streaming && done ? <DonePop /> : null}
-
-                //       {rest.length > 0 ? (
-                //         <div className="mt-2 space-y-2">
-                //           {rest.map((line, idx) => {
-                //             const bullet = isBullet(line);
-                //             const clean = bullet ? line.replace(/^\s*[•\-*]\s+/, "") : line;
-
-                //             return (
-                //               <div key={idx} className={bullet ? "flex gap-2" : ""}>
-                //                 {bullet ? <span className="mt-[2px]">•</span> : null}
-                //                 <div className="text-muted-foreground">
-                //                   <InlineCodeText text={clean} />
-                //                 </div>
-                //               </div>
-                //             );
-                //           })}
-                //         </div>
-                //       ) : null}
-                //     </div>
-                //   );
-                // }
-
-                // function CardsRow({ cards }: { cards: AICard[] }) {
-                //   if (!cards?.length) return null;
-
-                //   return (
-                //     <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                //       {cards.map((c, i) => (
-                //         <div
-                //           key={`${c.label}-${i}`}
-                //           className="rounded-2xl border bg-background px-3 py-3 shadow-sm"
-                //         >
-                //           <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                //             {c.label || "Info"}
-                //           </div>
-                //           <div className="mt-1 text-sm font-semibold break-words">
-                //             {String(c.value ?? "—")}
-                //           </div>
-                //         </div>
-                //       ))}
-                //     </div>
-                //   );
-                // }
-
-                // // outcome table
-                // function OutcomesTableCard({ title, rows }: { title: string; rows: any[] }) {
-                //   const [bankFilter, setBankFilter] = useState<string>("ALL");
-                //   const [page, setPage] = useState(1);
-                //   const [pageSize, setPageSize] = useState(10);
-
-                //   const banks = useMemo(() => {
-                //     return Array.from(
-                //       new Set(rows.map((r) => String(r?.bank ?? "").trim()).filter(Boolean))
-                //     ).sort((a, b) => a.localeCompare(b));
-                //   }, [rows]);
-
-                //   const filtered = useMemo(() => {
-                //     if (bankFilter === "ALL") return rows;
-                //     return rows.filter((r) => String(r?.bank ?? "").trim() === bankFilter);
-                //   }, [rows, bankFilter]);
-
-                //   const totalRows = filtered.length;
-                //   const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
-                //   const safePage = Math.min(Math.max(1, page), totalPages);
-
-                //   useEffect(() => {
-                //     if (page !== safePage) setPage(safePage);
-                //   }, [page, safePage]);
-
-                //   useEffect(() => {
-                //     setPage(1);
-                //   }, [bankFilter, pageSize]);
-
-                //   const pagedRows = useMemo(() => {
-                //     const start = (safePage - 1) * pageSize;
-                //     return filtered.slice(start, start + pageSize);
-                //   }, [filtered, safePage, pageSize]);
-
-                //   const totalAmount = useMemo(() => {
-                //     return filtered.reduce((sum, r) => sum + (toNumber(r?.amount) ?? 0), 0);
-                //   }, [filtered]);
-
-                //   const fromIdx = totalRows === 0 ? 0 : (safePage - 1) * pageSize + 1;
-                //   const toIdx = Math.min(safePage * pageSize, totalRows);
-
-                //   return (
-                //     <div className="mt-3 overflow-hidden rounded-3xl border bg-background shadow-sm">
-                //       <div className="flex flex-col gap-2 border-b bg-muted/30 px-4 py-3">
-                //         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                //           <div className="flex items-center gap-3">
-                //             <div className="text-sm font-semibold">Outcomes</div>
-                //             <div className="text-xs text-muted-foreground">{title}</div>
-                //           </div>
-
-                //           <div className="flex flex-wrap items-center gap-2">
-                //             <div className="flex items-center gap-2">
-                //               <span className="text-xs text-muted-foreground">Bank</span>
-                //               <select
-                //                 className="h-8 rounded-md border bg-background px-2 text-sm"
-                //                 value={bankFilter}
-                //                 onChange={(e) => setBankFilter(e.target.value)}
-                //               >
-                //                 <option value="ALL">All</option>
-                //                 {banks.map((b) => (
-                //                   <option key={b} value={b}>
-                //                     {b}
-                //                   </option>
-                //                 ))}
-                //               </select>
-                //             </div>
-
-                //             <div className="flex items-center gap-2">
-                //               <span className="text-xs text-muted-foreground">Rows</span>
-                //               <select
-                //                 className="h-8 rounded-md border bg-background px-2 text-sm"
-                //                 value={pageSize}
-                //                 onChange={(e) => setPageSize(Number(e.target.value))}
-                //               >
-                //                 <option value={10}>10</option>
-                //                 <option value={25}>25</option>
-                //                 <option value={50}>50</option>
-                //               </select>
-                //             </div>
-
-                //             <Button
-                //               variant="outline"
-                //               size="sm"
-                //               onClick={() => exportOutcomesCSV(filtered, "outcomes.csv")}
-                //             >
-                //               Export CSV
-                //             </Button>
-                //           </div>
-                //         </div>
-
-                //         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                //           <Button
-                //             variant="outline"
-                //             size="sm"
-                //             onClick={() => setPage((p) => Math.max(1, p - 1))}
-                //             disabled={safePage <= 1}
-                //           >
-                //             <ChevronLeft className="h-4 w-4" />
-                //           </Button>
-
-                //           <span className="tabular-nums">
-                //             Page {safePage} / {totalPages}
-                //           </span>
-
-                //           <Button
-                //             variant="outline"
-                //             size="sm"
-                //             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                //             disabled={safePage >= totalPages}
-                //           >
-                //             <ChevronRight className="h-4 w-4" />
-                //           </Button>
-
-                //           <span className="tabular-nums">
-                //             Showing {fromIdx}–{toIdx} of {totalRows}
-                //           </span>
-
-                //           <span className="tabular-nums">
-                //             Total: ¥{totalAmount.toLocaleString()}
-                //           </span>
-                //         </div>
-                //       </div>
-
-                //       <div className="max-h-[520px] overflow-auto">
-                //         <Table>
-                //           <TableHeader className="sticky top-0 z-10 bg-background">
-                //             <TableRow className="bg-background">
-                //               <TableHead className="whitespace-nowrap">Date</TableHead>
-                //               <TableHead className="whitespace-nowrap">Shop</TableHead>
-                //               <TableHead className="whitespace-nowrap">Bank</TableHead>
-                //               <TableHead className="whitespace-nowrap text-right">
-                //                 Amount
-                //               </TableHead>
-                //               <TableHead className="whitespace-nowrap">Notice</TableHead>
-                //             </TableRow>
-                //           </TableHeader>
-
-                //           <TableBody>
-                //             {pagedRows.length === 0 ? (
-                //               <TableRow>
-                //                 <TableCell
-                //                   colSpan={5}
-                //                   className="py-10 text-center text-sm text-muted-foreground"
-                //                 >
-                //                   No data
-                //                 </TableCell>
-                //               </TableRow>
-                //             ) : (
-                //               pagedRows.map((r: any, idx: number) => {
-                //                 const date = toISODate(r?.date) || toISODate(r?.createdAt);
-                //                 const shop = cellText(r?.shop);
-                //                 const bank = cellText(r?.bank);
-                //                 const amountNum = toNumber(r?.amount);
-                //                 const notice = cellText(r?.notice);
-
-                //                 const amountCls =
-                //                   amountNum === null
-                //                     ? "text-muted-foreground"
-                //                     : amountNum > 0
-                //                     ? "text-emerald-600 dark:text-emerald-400"
-                //                     : amountNum < 0
-                //                     ? "text-red-600 dark:text-red-400"
-                //                     : "text-muted-foreground";
-
-                //                 return (
-                //                   <TableRow
-                //                     key={r?._id?.$oid ?? r?._id ?? `${safePage}-${idx}`}
-                //                     className={[
-                //                       "hover:bg-muted/30",
-                //                       idx % 2 === 0 ? "bg-background" : "bg-muted/10",
-                //                     ].join(" ")}
-                //                   >
-                //                     <TableCell className="whitespace-nowrap text-xs text-muted-foreground tabular-nums">
-                //                       {date || "—"}
-                //                     </TableCell>
-
-                //                     <TableCell className="max-w-[220px]">
-                //                       <span className="inline-flex items-center rounded-full border bg-background px-2 py-1 text-xs">
-                //                         {shop}
-                //                       </span>
-                //                     </TableCell>
-
-                //                     <TableCell className="max-w-[220px]">
-                //                       <span className="inline-flex items-center rounded-full border bg-background px-2 py-1 text-xs">
-                //                         {bank}
-                //                       </span>
-                //                     </TableCell>
-
-                //                     <TableCell
-                //                       className={[
-                //                         "whitespace-nowrap text-right font-semibold tabular-nums",
-                //                         amountCls,
-                //                       ].join(" ")}
-                //                     >
-                //                       {yen(r?.amount)}
-                //                     </TableCell>
-
-                //                     <TableCell className="max-w-[360px] text-sm text-muted-foreground">
-                //                       {notice}
-                //                     </TableCell>
-                //                   </TableRow>
-                //                 );
-                //               })
-                //             )}
-                //           </TableBody>
-                //         </Table>
-                //       </div>
-                //     </div>
-                //   );
-                // }
-
-                // // income table
-                // function IncomesTableCard({ title, rows }: { title: string; rows: any[] }) {
-                //   const [companyFilter, setCompanyFilter] = useState<string>("ALL");
-                //   const [page, setPage] = useState(1);
-                //   const [pageSize, setPageSize] = useState(10);
-
-                //   const companies = useMemo(() => {
-                //     return Array.from(
-                //       new Set(
-                //         rows
-                //           .map((r) => String(r?.company ?? r?.compamy ?? "").trim())
-                //           .filter(Boolean)
-                //       )
-                //     ).sort((a, b) => a.localeCompare(b));
-                //   }, [rows]);
-
-                //   const filtered = useMemo(() => {
-                //     if (companyFilter === "ALL") return rows;
-                //     return rows.filter(
-                //       (r) => String(r?.company ?? r?.compamy ?? "").trim() === companyFilter
-                //     );
-                //   }, [rows, companyFilter]);
-
-                //   const totalRows = filtered.length;
-                //   const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
-                //   const safePage = Math.min(Math.max(1, page), totalPages);
-
-                //   useEffect(() => {
-                //     if (page !== safePage) setPage(safePage);
-                //   }, [page, safePage]);
-
-                //   useEffect(() => {
-                //     setPage(1);
-                //   }, [companyFilter, pageSize]);
-
-                //   const pagedRows = useMemo(() => {
-                //     const start = (safePage - 1) * pageSize;
-                //     return filtered.slice(start, start + pageSize);
-                //   }, [filtered, safePage, pageSize]);
-
-                //   const totalAmount = useMemo(() => {
-                //     return filtered.reduce((sum, r) => sum + (toNumber(r?.amount) ?? 0), 0);
-                //   }, [filtered]);
-
-                //   const fromIdx = totalRows === 0 ? 0 : (safePage - 1) * pageSize + 1;
-                //   const toIdx = Math.min(safePage * pageSize, totalRows);
-
-                //   return (
-                //     <div className="mt-3 overflow-hidden rounded-3xl border bg-background shadow-sm">
-                //       <div className="flex flex-col gap-2 border-b bg-muted/30 px-4 py-3">
-                //         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                //           <div className="flex items-center gap-3">
-                //             <div className="text-sm font-semibold">Incomes</div>
-                //             <div className="text-xs text-muted-foreground">{title}</div>
-                //           </div>
-
-                //           <div className="flex flex-wrap items-center gap-2">
-                //             <div className="flex items-center gap-2">
-                //               <span className="text-xs text-muted-foreground">Company</span>
-                //               <select
-                //                 className="h-8 rounded-md border bg-background px-2 text-sm"
-                //                 value={companyFilter}
-                //                 onChange={(e) => setCompanyFilter(e.target.value)}
-                //               >
-                //                 <option value="ALL">All</option>
-                //                 {companies.map((c) => (
-                //                   <option key={c} value={c}>
-                //                     {c}
-                //                   </option>
-                //                 ))}
-                //               </select>
-                //             </div>
-
-                //             <div className="flex items-center gap-2">
-                //               <span className="text-xs text-muted-foreground">Rows</span>
-                //               <select
-                //                 className="h-8 rounded-md border bg-background px-2 text-sm"
-                //                 value={pageSize}
-                //                 onChange={(e) => setPageSize(Number(e.target.value))}
-                //               >
-                //                 <option value={10}>10</option>
-                //                 <option value={25}>25</option>
-                //                 <option value={50}>50</option>
-                //               </select>
-                //             </div>
-
-                //             <Button
-                //               variant="outline"
-                //               size="sm"
-                //               onClick={() => exportIncomesCSV(filtered, "incomes.csv")}
-                //             >
-                //               Export CSV
-                //             </Button>
-                //           </div>
-                //         </div>
-
-                //         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                //           <Button
-                //             variant="outline"
-                //             size="sm"
-                //             onClick={() => setPage((p) => Math.max(1, p - 1))}
-                //             disabled={safePage <= 1}
-                //           >
-                //             <ChevronLeft className="h-4 w-4" />
-                //           </Button>
-
-                //           <span className="tabular-nums">
-                //             Page {safePage} / {totalPages}
-                //           </span>
-
-                //           <Button
-                //             variant="outline"
-                //             size="sm"
-                //             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                //             disabled={safePage >= totalPages}
-                //           >
-                //             <ChevronRight className="h-4 w-4" />
-                //           </Button>
-
-                //           <span className="tabular-nums">
-                //             Showing {fromIdx}–{toIdx} of {totalRows}
-                //           </span>
-
-                //           <span className="tabular-nums">
-                //             Total: ¥{totalAmount.toLocaleString()}
-                //           </span>
-                //         </div>
-                //       </div>
-
-                //       <div className="max-h-[520px] overflow-auto">
-                //         <Table>
-                //           <TableHeader className="sticky top-0 z-10 bg-background">
-                //             <TableRow className="bg-background">
-                //               <TableHead className="whitespace-nowrap">Date</TableHead>
-                //               <TableHead className="whitespace-nowrap">Company</TableHead>
-                //               <TableHead className="whitespace-nowrap">Month</TableHead>
-                //               <TableHead className="whitespace-nowrap text-right">
-                //                 Amount
-                //               </TableHead>
-                //               <TableHead className="whitespace-nowrap">Notice</TableHead>
-                //             </TableRow>
-                //           </TableHeader>
-
-                //           <TableBody>
-                //             {pagedRows.length === 0 ? (
-                //               <TableRow>
-                //                 <TableCell
-                //                   colSpan={5}
-                //                   className="py-10 text-center text-sm text-muted-foreground"
-                //                 >
-                //                   No data
-                //                 </TableCell>
-                //               </TableRow>
-                //             ) : (
-                //               pagedRows.map((r: any, idx: number) => {
-                //                 const date = toISODate(r?.date) || toISODate(r?.createdAt);
-                //                 const company = cellText(r?.company ?? r?.compamy);
-                //                 const month = cellText(r?.month);
-                //                 const amountNum = toNumber(r?.amount);
-                //                 const notice = cellText(r?.notice);
-
-                //                 const amountCls =
-                //                   amountNum === null
-                //                     ? "text-muted-foreground"
-                //                     : amountNum > 0
-                //                     ? "text-emerald-600 dark:text-emerald-400"
-                //                     : amountNum < 0
-                //                     ? "text-red-600 dark:text-red-400"
-                //                     : "text-muted-foreground";
-
-                //                 return (
-                //                   <TableRow
-                //                     key={r?._id?.$oid ?? r?._id ?? `${safePage}-${idx}`}
-                //                     className={[
-                //                       "hover:bg-muted/30",
-                //                       idx % 2 === 0 ? "bg-background" : "bg-muted/10",
-                //                     ].join(" ")}
-                //                   >
-                //                     <TableCell className="whitespace-nowrap text-xs text-muted-foreground tabular-nums">
-                //                       {date || "—"}
-                //                     </TableCell>
-
-                //                     <TableCell className="max-w-[260px]">
-                //                       <span className="inline-flex items-center rounded-full border bg-background px-2 py-1 text-xs">
-                //                         {company}
-                //                       </span>
-                //                     </TableCell>
-
-                //                     <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
-                //                       {month}
-                //                     </TableCell>
-
-                //                     <TableCell
-                //                       className={[
-                //                         "whitespace-nowrap text-right font-semibold tabular-nums",
-                //                         amountCls,
-                //                       ].join(" ")}
-                //                     >
-                //                       {yen(r?.amount)}
-                //                     </TableCell>
-
-                //                     <TableCell className="max-w-[360px] text-sm text-muted-foreground">
-                //                       {notice}
-                //                     </TableCell>
-                //                   </TableRow>
-                //                 );
-                //               })
-                //             )}
-                //           </TableBody>
-                //         </Table>
-                //       </div>
-                //     </div>
-                //   );
-                // }
-
-                // // chart UI
-                // function ChartCard({
-                //   title,
-                //   children,
-                // }: {
-                //   title: string;
-                //   children: React.ReactNode;
-                // }) {
-                //   return (
-                //     <div className="mt-3 overflow-hidden rounded-3xl border bg-background shadow-sm">
-                //       <div className="border-b bg-muted/30 px-4 py-3">
-                //         <div className="text-sm font-semibold">{title}</div>
-                //         <div className="mt-1 text-xs text-muted-foreground">
-                //           Trend / Breakdown ကိုပြထားပါတယ် ✅
-                //         </div>
-                //       </div>
-                //       <div className="p-4">{children}</div>
-                //     </div>
-                //   );
-                // }
-
-                // // function OutcomeChartsCard({
-                // //   series,
-                // // }: {
-                // //   series: {
-                // //     trend?: { x: string; y: number }[];
-                // //     byShop?: { name: string; value: number }[];
-                // //     byCategory?: { name: string; value: number }[];
-                // //     byBank?: { name: string; value: number }[];
-                // //   };
-                // // }) {
-                // //   const trend = Array.isArray(series?.trend) ? series.trend : [];
-                // //   const byShop = Array.isArray(series?.byShop) ? series.byShop : [];
-                // //   const byCategory = Array.isArray(series?.byCategory) ? series.byCategory : [];
-                // //   const byBank = Array.isArray(series?.byBank) ? series.byBank : [];
-
-                // //   const totalTrend = trend.reduce((s, p) => s + (Number(p?.y) || 0), 0);
-
-                // //   return (
-                // //     <div className="space-y-3">
-                // //       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                // //         <span className="rounded-full border bg-background px-2 py-1">
-                // //           Points: <span className="tabular-nums">{trend.length}</span>
-                // //         </span>
-                // //         <span className="rounded-full border bg-background px-2 py-1">
-                // //           Total(trend):{" "}
-                // //           <span className="tabular-nums">¥{totalTrend.toLocaleString()}</span>
-                // //         </span>
-                // //       </div>
-
-                // //       <div className="rounded-3xl border bg-background p-3">
-                // //         <div className="mb-2 text-xs font-semibold text-muted-foreground">
-                // //           Trend (Day/Month)
-                // //         </div>
-
-                // //         <div className="h-[420px]">
-                // //           <ResponsiveContainer width="100%" height="100%">
-                // //             <LineChart data={trend}>
-                // //               <CartesianGrid strokeDasharray="3 3" />
-                // //               <XAxis dataKey="x" hide />
-                // //               <YAxis />
-                // //               <Tooltip />
-                // //               <Line type="monotone" dataKey="y" dot={false} />
-                // //             </LineChart>
-                // //           </ResponsiveContainer>
-                // //         </div>
-                // //       </div>
-
-                // //       <div className="grid gap-3 lg:grid-cols-3">
-                // //         <div className="rounded-3xl border bg-background p-3">
-                // //           <div className="mb-2 text-xs font-semibold text-muted-foreground">
-                // //             Top Shops
-                // //           </div>
-                // //           <div className="h-[320px]">
-                // //             <ResponsiveContainer width="100%" height="100%">
-                // //               <BarChart data={byShop}>
-                // //                 <defs>
-                // //                   <linearGradient id="shopGradient" x1="0" y1="0" x2="0" y2="1">
-                // //                     <stop offset="5%" stopColor="#22c55e" stopOpacity={0.9} />
-                // //                     <stop offset="95%" stopColor="#06b6d4" stopOpacity={0.9} />
-                // //                   </linearGradient>
-                // //                 </defs>
-                // //                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                // //                 <XAxis dataKey="name" hide />
-                // //                 <YAxis tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
-                // //                 <Tooltip
-                // //                   cursor={{ fill: "rgba(0,0,0,0.05)" }}
-                // //                   contentStyle={{
-                // //                     borderRadius: "12px",
-                // //                     border: "1px solid #e5e7eb",
-                // //                     background: "#fff",
-                // //                   }}
-                // //                 />
-                // //                 <Bar
-                // //                   dataKey="value"
-                // //                   radius={[10, 10, 0, 0]}
-                // //                   fill="url(#shopGradient)"
-                // //                 />
-                // //               </BarChart>
-                // //             </ResponsiveContainer>
-                // //           </div>
-                // //         </div>
-
-                // //         <div className="rounded-3xl border bg-background p-3">
-                // //           <div className="mb-2 text-xs font-semibold text-muted-foreground">
-                // //             Top Categories
-                // //           </div>
-                // //           <div className="h-[320px]">
-                // //             <ResponsiveContainer width="100%" height="100%">
-                // //               <BarChart data={byCategory}>
-                // //                 <defs>
-                // //                   <linearGradient
-                // //                     id="categoryGradient"
-                // //                     x1="0"
-                // //                     y1="0"
-                // //                     x2="0"
-                // //                     y2="1"
-                // //                   >
-                // //                     <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.9} />
-                // //                     <stop offset="95%" stopColor="#ef4444" stopOpacity={0.9} />
-                // //                   </linearGradient>
-                // //                 </defs>
-                // //                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                // //                 <XAxis dataKey="name" hide />
-                // //                 <YAxis tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
-                // //                 <Tooltip
-                // //                   cursor={{ fill: "rgba(0,0,0,0.05)" }}
-                // //                   contentStyle={{
-                // //                     borderRadius: "12px",
-                // //                     border: "1px solid #e5e7eb",
-                // //                     background: "#fff",
-                // //                   }}
-                // //                 />
-                // //                 <Bar
-                // //                   dataKey="value"
-                // //                   radius={[10, 10, 0, 0]}
-                // //                   fill="url(#categoryGradient)"
-                // //                 />
-                // //               </BarChart>
-                // //             </ResponsiveContainer>
-                // //           </div>
-                // //         </div>
-
-                // //         <div className="rounded-3xl border bg-background p-3">
-                // //           <div className="mb-2 text-xs font-semibold text-muted-foreground">
-                // //             Bank Breakdown
-                // //           </div>
-                // //           <div className="h-[320px]">
-                // //             <ResponsiveContainer width="100%" height="100%">
-                // //               <BarChart data={byBank}>
-                // //                 <defs>
-                // //                   <linearGradient id="bankGradient" x1="0" y1="0" x2="0" y2="1">
-                // //                     <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.9} />
-                // //                     <stop offset="95%" stopColor="#6366f1" stopOpacity={0.9} />
-                // //                   </linearGradient>
-                // //                 </defs>
-                // //                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                // //                 <XAxis dataKey="name" hide />
-                // //                 <YAxis tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
-                // //                 <Tooltip
-                // //                   cursor={{ fill: "rgba(0,0,0,0.05)" }}
-                // //                   contentStyle={{
-                // //                     borderRadius: "12px",
-                // //                     border: "1px solid #e5e7eb",
-                // //                     background: "#fff",
-                // //                   }}
-                // //                 />
-                // //                 <Bar
-                // //                   dataKey="value"
-                // //                   radius={[10, 10, 0, 0]}
-                // //                   fill="url(#bankGradient)"
-                // //                 />
-                // //               </BarChart>
-                // //             </ResponsiveContainer>
-                // //           </div>
-                // //         </div>
-                // //       </div>
-                // //     </div>
-                // //   );
-                // // }
-
-                // function IncomeChartsCard({
-                //   series,
-                // }: {
-                //   series: {
-                //     trend?: { x: string; y: number }[];
-                //     byCompany?: { name: string; value: number }[];
-                //   };
-                // }) {
-                //   const trend = Array.isArray(series?.trend) ? series.trend : [];
-                //   const byCompany = Array.isArray(series?.byCompany) ? series.byCompany : [];
-                //   const totalTrend = trend.reduce((s, p) => s + (Number(p?.y) || 0), 0);
-
-                //   return (
-                //     <div className="space-y-3">
-                //       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                //         <span className="rounded-full border bg-background px-2 py-1">
-                //           Points: <span className="tabular-nums">{trend.length}</span>
-                //         </span>
-                //         <span className="rounded-full border bg-background px-2 py-1">
-                //           Total(trend):{" "}
-                //           <span className="tabular-nums">¥{totalTrend.toLocaleString()}</span>
-                //         </span>
-                //       </div>
-
-                //       <div className="rounded-3xl border bg-background p-3">
-                //         <div className="mb-2 text-xs font-semibold text-muted-foreground">
-                //           Trend (Day/Month)
-                //         </div>
-
-                //         <div className="h-[420px]">
-                //           <ResponsiveContainer width="100%" height="100%">
-                //             <LineChart data={trend}>
-                //               <CartesianGrid strokeDasharray="3 3" />
-                //               <XAxis dataKey="x" hide />
-                //               <YAxis />
-                //               <Tooltip />
-                //               <Line type="monotone" dataKey="y" dot={false} />
-                //             </LineChart>
-                //           </ResponsiveContainer>
-                //         </div>
-                //       </div>
-
-                //       <div className="rounded-3xl border bg-background p-3">
-                //         <div className="mb-2 text-xs font-semibold text-muted-foreground">
-                //           Top Companies
-                //         </div>
-                //         <div className="h-[320px]">
-                //           <ResponsiveContainer width="100%" height="100%">
-                //             <BarChart data={byCompany}>
-                //               <defs>
-                //                 <linearGradient id="colorBar" x1="0" y1="0" x2="0" y2="1">
-                //                   <stop offset="5%" stopColor="#6366f1" stopOpacity={0.9} />
-                //                   <stop offset="95%" stopColor="#22c55e" stopOpacity={0.9} />
-                //                 </linearGradient>
-                //               </defs>
-                //               <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                //               <XAxis dataKey="name" hide />
-                //               <YAxis />
-                //               <Tooltip
-                //                 cursor={{ fill: "rgba(0,0,0,0.05)" }}
-                //                 contentStyle={{
-                //                   borderRadius: "12px",
-                //                   border: "1px solid #e5e7eb",
-                //                   background: "#fff",
-                //                 }}
-                //               />
-                //               <Bar
-                //                 dataKey="value"
-                //                 radius={[10, 10, 0, 0]}
-                //                 fill="url(#colorBar)"
-                //               />
-                //             </BarChart>
-                //           </ResponsiveContainer>
-                //         </div>
-                //       </div>
-                //     </div>
-                //   );
-                // }
-
-                // // report UI
-                // function MiniKVTable({
-                //   title,
-                //   rows,
-                // }: {
-                //   title: string;
-                //   rows: { k: string; v: any }[];
-                // }) {
-                //   return (
-                //     <div className="overflow-hidden rounded-3xl border bg-background">
-                //       <div className="border-b bg-muted/30 px-4 py-2 text-sm font-semibold">
-                //         {title}
-                //       </div>
-                //       <div className="p-3">
-                //         <div className="grid gap-2 sm:grid-cols-2">
-                //           {rows.map((r, i) => (
-                //             <div
-                //               key={r.k + i}
-                //               className="flex items-center justify-between rounded-2xl border bg-background px-3 py-2"
-                //             >
-                //               <div className="text-xs text-muted-foreground">{r.k}</div>
-                //               <div className="text-sm font-semibold tabular-nums">
-                //                 {String(r.v ?? "—")}
-                //               </div>
-                //             </div>
-                //           ))}
-                //         </div>
-                //       </div>
-                //     </div>
-                //   );
-                // }
-
-                // function ReportCard({ report, title }: { report: any; title?: string }) {
-                //   const stats = report?.stats ?? {};
-                //   const steps: string[] = Array.isArray(report?.next_steps)
-                //     ? report.next_steps
-                //     : [];
-                //   const summary = String(report?.summary ?? "Report");
-
-                //   return (
-                //     <div className="mt-3 overflow-hidden rounded-3xl border bg-background shadow-sm">
-                //       <div className="border-b bg-muted/30 px-4 py-3">
-                //         <div className="text-sm font-semibold">{title ?? "Report"}</div>
-                //         <div className="mt-1 text-xs text-muted-foreground">{summary}</div>
-                //       </div>
-
-                //       <div className="grid gap-3 p-3 lg:grid-cols-2">
-                //         <MiniKVTable
-                //           title="Stats"
-                //           rows={[
-                //             { k: "Count", v: stats?.count ?? "—" },
-                //             {
-                //               k: "Total",
-                //               v: `¥${Number(stats?.total_amount ?? 0).toLocaleString()}`,
-                //             },
-                //             {
-                //               k: "Avg",
-                //               v: `¥${Number(stats?.avg_amount ?? 0).toLocaleString()}`,
-                //             },
-                //           ]}
-                //         />
-
-                //         <div className="overflow-hidden rounded-3xl border bg-background">
-                //           <div className="border-b bg-muted/30 px-4 py-2 text-sm font-semibold">
-                //             Next steps
-                //           </div>
-                //           <div className="p-3">
-                //             {steps.length === 0 ? (
-                //               <div className="text-sm text-muted-foreground">No steps</div>
-                //             ) : (
-                //               <ul className="space-y-2">
-                //                 {steps.slice(0, 12).map((s, i) => (
-                //                   <li key={i} className="flex gap-2 text-sm">
-                //                     <span className="mt-[2px] inline-block h-5 w-5 shrink-0 rounded-full border bg-background text-center text-xs leading-5 text-muted-foreground">
-                //                       {i + 1}
-                //                     </span>
-                //                     <span className="text-muted-foreground">{s}</span>
-                //                   </li>
-                //                 ))}
-                //               </ul>
-                //             )}
-                //           </div>
-                //         </div>
-                //       </div>
-                //     </div>
-                //   );
-                // }
-
-                // // image UI
-                // function downloadDataUrl(dataUrl: string, filename = "image.png") {
-                //   const a = document.createElement("a");
-                //   a.href = dataUrl;
-                //   a.download = filename;
-                //   document.body.appendChild(a);
-                //   a.click();
-                //   a.remove();
-                // }
-
-                // function ImageCard({
-                //   title,
-                //   src,
-                //   kind,
-                //   poster,
-                // }: {
-                //   title?: string;
-                //   src: string;
-                //   kind?: Mode | "mixed";
-                //   poster?: PosterMeta | null;
-                // }) {
-                //   const safeName = (
-                //     title ||
-                //     poster?.title ||
-                //     (kind === "income" ? "income" : kind === "outcome" ? "outcome" : "image")
-                //   )
-                //     .replace(/[^\w\-]+/g, "_")
-                //     .slice(0, 40);
-
-                //   const isPoster = !!poster;
-                //   const styleText = poster?.style ?? poster?.theme ?? null;
-                //   const posterBullets = Array.isArray(poster?.bullets) ? poster!.bullets! : [];
-
-                //   return (
-                //     <div className="mt-3 overflow-hidden rounded-3xl border bg-background shadow-sm">
-                //       <div className="flex flex-col gap-2 border-b bg-muted/30 px-4 py-3">
-                //         <div className="flex flex-wrap items-center justify-between gap-2">
-                //           <div className="min-w-0">
-                //             <div className="flex flex-wrap items-center gap-2">
-                //               <div className="truncate text-sm font-semibold">
-                //                 {title ??
-                //                   poster?.title ??
-                //                   (kind === "income"
-                //                     ? "Income Image"
-                //                     : kind === "outcome"
-                //                     ? "Outcome Image"
-                //                     : "Image")}
-                //               </div>
-
-                //               {isPoster ? (
-                //                 <span className="rounded-full border bg-background px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-                //                   Poster
-                //                 </span>
-                //               ) : null}
-
-                //               {styleText ? (
-                //                 <span className="rounded-full border bg-background px-2 py-0.5 text-[11px] text-muted-foreground">
-                //                   {styleText}
-                //                 </span>
-                //               ) : null}
-
-                //               {poster?.size ? (
-                //                 <span className="rounded-full border bg-background px-2 py-0.5 text-[11px] text-muted-foreground">
-                //                   {poster.size}
-                //                 </span>
-                //               ) : null}
-                //             </div>
-
-                //             {poster?.subtitle ? (
-                //               <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                //                 {poster.subtitle}
-                //               </div>
-                //             ) : null}
-                //           </div>
-
-                //           <div className="flex items-center gap-2">
-                //             <Button
-                //               variant="outline"
-                //               size="sm"
-                //               onClick={() => downloadDataUrl(src, `${safeName}.png`)}
-                //             >
-                //               Download PNG
-                //             </Button>
-                //             <Button
-                //               variant="outline"
-                //               size="sm"
-                //               onClick={() => window.open(src, "_blank")}
-                //             >
-                //               Open
-                //             </Button>
-                //           </div>
-                //         </div>
-
-                //         {isPoster && posterBullets.length > 0 ? (
-                //           <div className="flex flex-wrap gap-2">
-                //             {posterBullets.slice(0, 4).map((b, i) => (
-                //               <span
-                //                 key={`${b}-${i}`}
-                //                 className="rounded-full border bg-background px-2 py-1 text-[11px] text-muted-foreground"
-                //               >
-                //                 {b}
-                //               </span>
-                //             ))}
-                //           </div>
-                //         ) : null}
-                //       </div>
-
-                //       <div className="p-3">
-                //         <img
-                //           src={src}
-                //           alt={title ?? poster?.title ?? "image"}
-                //           className="w-full rounded-2xl border"
-                //         />
-                //       </div>
-                //     </div>
-                //   );
-                // }
-
-                // // main page
-                // export default function ChatPage() {
-                //   const [messages, setMessages] = useState<Msg[]>([]);
-                //   const [text, setText] = useState("");
-                //   const [loading, setLoading] = useState(false);
-
-                //   const bottomRef = useRef<HTMLDivElement | null>(null);
-
-                //   const textTimer = useRef<number | null>(null);
-                //   const lineTimer = useRef<number | null>(null);
-                //   const fullLinesRef = useRef<Record<string, string[]>>({});
-
-                //   const [confirmOpen, setConfirmOpen] = useState(false);
-                //   const [confirmLoading, setConfirmLoading] = useState(false);
-                //   const [draftAI, setDraftAI] = useState<any>(null);
-                //   const [draftKind, setDraftKind] = useState<Mode>("outcome");
-
-                //   const [confirmBank, setConfirmBank] = useState<string>("");
-                //   const [confirmDate, setConfirmDate] = useState<string>("");
-                //   const [confirmCompany, setConfirmCompany] = useState<string>("");
-                //   const [confirmMonth, setConfirmMonth] = useState<string>("");
-
-                //   useEffect(() => {
-                //     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-                //   }, [messages, loading]);
-
-                //   useEffect(() => {
-                //     return () => {
-                //       if (textTimer.current) window.clearInterval(textTimer.current);
-                //       if (lineTimer.current) window.clearInterval(lineTimer.current);
-                //     };
-                //   }, []);
-
-                //   async function parseJsonSafe(res: Response) {
-                //     const raw = await res.text().catch(() => "");
-                //     try {
-                //       return raw ? JSON.parse(raw) : {};
-                //     } catch {
-                //       return { raw };
-                //     }
-                //   }
-
-                //   async function smartParseOutcome(input: string): Promise<AIResult> {
-                //     const r = await fetch("/api/ai/parse-outcome", {
-                //       method: "POST",
-                //       headers: { "Content-Type": "application/json" },
-                //       body: JSON.stringify({ text: input }),
-                //     });
-
-                //     const parsed = await parseJsonSafe(r);
-
-                //     if (!r.ok) {
-                //       const msg =
-                //         parsed?.error ??
-                //         parsed?.message ??
-                //         parsed?.detail ??
-                //         parsed?.raw ??
-                //         "parse-outcome failed";
-                //       throw new Error(`AI error (${r.status}): ${String(msg).slice(0, 300)}`);
-                //     }
-
-                //     return parsed;
-                //   }
-
-                //   async function smartParseIncome(input: string): Promise<AIResult> {
-                //     const r = await fetch("/api/ai/parse-income", {
-                //       method: "POST",
-                //       headers: { "Content-Type": "application/json" },
-                //       body: JSON.stringify({ text: input }),
-                //     });
-
-                //     const parsed = await parseJsonSafe(r);
-
-                //     if (!r.ok) {
-                //       const msg =
-                //         parsed?.error ??
-                //         parsed?.message ??
-                //         parsed?.detail ??
-                //         parsed?.raw ??
-                //         "parse-income failed";
-                //       throw new Error(`AI error (${r.status}): ${String(msg).slice(0, 300)}`);
-                //     }
-
-                //     return parsed;
-                //   }
-
-                //   async function getNextSteps(): Promise<AIResult> {
-                //     const r = await fetch("/api/ai/next-steps", { method: "GET" });
-                //     const parsed = await parseJsonSafe(r);
-
-                //     if (!r.ok) {
-                //       const msg =
-                //         parsed?.error ??
-                //         parsed?.message ??
-                //         parsed?.detail ??
-                //         parsed?.raw ??
-                //         "next-steps failed";
-                //       throw new Error(`AI error (${r.status}): ${String(msg).slice(0, 300)}`);
-                //     }
-
-                //     return parsed;
-                //   }
-
-                //   async function smartParseAny(
-                //     input: string
-                //   ): Promise<{ ai: any; kind: Mode | "mixed" }> {
-                //     const raw = (input || "").trim();
-
-                //     const isNextStepsCmd =
-                //       /(^|\s)(next steps|insight|report|analysis|summary|အကြံပြု|ဘာတွေလုပ်ရမလဲ)(\s|$)/i.test(
-                //         raw
-                //       );
-
-                //     if (isNextStepsCmd) {
-                //       const ai = await getNextSteps();
-                //       return { ai, kind: "outcome" };
-                //     }
-
-                //     const guess = detectKindByText(raw);
-
-                //     if (guess === "income") {
-                //       try {
-                //         const ai = await smartParseIncome(raw);
-                //         const kind = detectKindByIntent(ai);
-                //         return { ai, kind: kind === "mixed" ? "income" : kind };
-                //       } catch (e) {
-                //         if (!isBadRequestLike(e)) throw e;
-                //         const ai = await smartParseOutcome(raw);
-                //         const kind = detectKindByIntent(ai);
-                //         return { ai, kind: kind === "mixed" ? "outcome" : kind };
-                //       }
-                //     }
-
-                //     if (guess === "outcome") {
-                //       try {
-                //         const ai = await smartParseOutcome(raw);
-                //         const kind = detectKindByIntent(ai);
-                //         return { ai, kind: kind === "mixed" ? "outcome" : kind };
-                //       } catch (e) {
-                //         if (!isBadRequestLike(e)) throw e;
-                //         const ai = await smartParseIncome(raw);
-                //         const kind = detectKindByIntent(ai);
-                //         return { ai, kind: kind === "mixed" ? "income" : kind };
-                //       }
-                //     }
-
-                //     try {
-                //       const ai1 = await smartParseOutcome(raw);
-                //       const kind1 = detectKindByIntent(ai1);
-
-                //       if (isRecognized(ai1)) {
-                //         return { ai: ai1, kind: kind1 === "mixed" ? "outcome" : kind1 };
-                //       }
-
-                //       const ai2 = await smartParseIncome(raw);
-                //       const kind2 = detectKindByIntent(ai2);
-
-                //       if (isRecognized(ai2)) {
-                //         return { ai: ai2, kind: kind2 === "mixed" ? "income" : kind2 };
-                //       }
-
-                //       return { ai: ai1, kind: "mixed" };
-                //     } catch (e1) {
-                //       try {
-                //         const ai2 = await smartParseIncome(raw);
-                //         const kind2 = detectKindByIntent(ai2);
-                //         return { ai: ai2, kind: kind2 === "mixed" ? "income" : kind2 };
-                //       } catch (e2) {
-                //         throw e2;
-                //       }
-                //     }
-                //   }
-
-                //   async function saveOutcome(
-                //     ai: any,
-                //     override?: { bank?: string; dateISO?: string }
-                //   ) {
-                //     const p = getPayload(ai);
-
-                //     const bank = override?.bank ?? p.bank ?? ai?.bank ?? "—";
-                //     const dateISO =
-                //       override?.dateISO ?? p.date ?? ai?.date ?? new Date().toISOString();
-
-                //     const r = await fetch("/api/outcome", {
-                //       method: "POST",
-                //       headers: { "Content-Type": "application/json" },
-                //       body: JSON.stringify({
-                //         amount: p.amount ?? ai?.amount ?? "",
-                //         shop: p.shop ?? ai?.shop ?? "",
-                //         bank,
-                //         notice: `${p.notice ?? ai?.notice ?? ""}`.trim(),
-                //         date: dateISO,
-                //       }),
-                //     });
-
-                //     if (!r.ok) {
-                //       const parsed = await parseJsonSafe(r);
-                //       const msg =
-                //         parsed?.error ??
-                //         parsed?.message ??
-                //         parsed?.detail ??
-                //         parsed?.raw ??
-                //         "Save failed";
-                //       throw new Error(
-                //         `Save failed (${r.status}): ${String(msg).slice(0, 200)}`
-                //       );
-                //     }
-                //   }
-
-                //   async function saveIncome(
-                //     ai: any,
-                //     override?: { company?: string; month?: string; dateISO?: string }
-                //   ) {
-                //     const p = getPayload(ai);
-
-                //     const dateISO =
-                //       override?.dateISO ?? p.date ?? ai?.date ?? new Date().toISOString();
-
-                //     const date = new Date(dateISO);
-                //     const y = date.getUTCFullYear();
-                //     const m = String(date.getUTCMonth() + 1).padStart(2, "0");
-                //     const monthAuto = `${y}-${m}`;
-
-                //     const company =
-                //       override?.company ??
-                //       p.company ??
-                //       p.compamy ??
-                //       ai?.company ??
-                //       ai?.compamy ??
-                //       "—";
-
-                //     const month = override?.month ?? p.month ?? ai?.month ?? monthAuto;
-
-                //     const r = await fetch("/api/incomes", {
-                //       method: "POST",
-                //       headers: { "Content-Type": "application/json" },
-                //       body: JSON.stringify({
-                //         amount: p.amount ?? ai?.amount ?? "",
-                //         month,
-                //         compamy: company,
-                //         notice: p.notice ?? ai?.notice ?? "",
-                //         date: dateISO,
-                //       }),
-                //     });
-
-                //     if (!r.ok) {
-                //       const parsed = await parseJsonSafe(r);
-                //       const msg =
-                //         parsed?.error ??
-                //         parsed?.message ??
-                //         parsed?.detail ??
-                //         parsed?.raw ??
-                //         "Save failed";
-                //       throw new Error(
-                //         `Save failed (${r.status}): ${String(msg).slice(0, 200)}`
-                //       );
-                //     }
-                //   }
-
-                //   function streamAIText(fullText: string) {
-                //     const aiId = uid();
-                //     setMessages((p) => [
-                //       ...p,
-                //       { id: aiId, role: "ai", text: "", streaming: true },
-                //     ]);
-
-                //     let i = 0;
-                //     const speedMs = 12;
-
-                //     if (textTimer.current) window.clearInterval(textTimer.current);
-                //     if (lineTimer.current) window.clearInterval(lineTimer.current);
-
-                //     textTimer.current = window.setInterval(() => {
-                //       i += 1;
-                //       setMessages((prev) =>
-                //         prev.map((m) =>
-                //           m.id === aiId
-                //             ? {
-                //                 ...m,
-                //                 text: fullText.slice(0, i),
-                //                 streaming: i < fullText.length,
-                //               }
-                //             : m
-                //         )
-                //       );
-
-                //       if (i >= fullText.length) {
-                //         if (textTimer.current) window.clearInterval(textTimer.current);
-                //         textTimer.current = null;
-                //       }
-                //     }, speedMs);
-                //   }
-
-                //   function draftLines(
-                //     fullLines: string[],
-                //     extra?: Partial<Msg>,
-                //     afterDone?: () => void
-                //   ) {
-                //     const aiId = uid();
-                //     fullLinesRef.current[aiId] = fullLines;
-
-                //     setMessages((p) => [
-                //       ...p,
-                //       {
-                //         id: aiId,
-                //         role: "ai",
-                //         text: "",
-                //         lines: [""],
-                //         streaming: true,
-                //         done: false,
-                //         ...extra,
-                //       },
-                //     ]);
-
-                //     let lineIdx = 0;
-                //     let charIdx = 0;
-                //     const speedMs = 14;
-
-                //     if (textTimer.current) window.clearInterval(textTimer.current);
-                //     if (lineTimer.current) window.clearInterval(lineTimer.current);
-
-                //     lineTimer.current = window.setInterval(() => {
-                //       const all = fullLinesRef.current[aiId] ?? [];
-                //       if (!all.length) return;
-
-                //       const currentFull = String(all[lineIdx] ?? "");
-
-                //       setMessages((prev) =>
-                //         prev.map((m) => {
-                //           if (m.id !== aiId) return m;
-
-                //           const curLines = Array.isArray(m.lines) ? [...m.lines] : [""];
-                //           while (curLines.length < lineIdx + 1) curLines.push("");
-
-                //           const nextChar = currentFull.charAt(charIdx);
-                //           curLines[lineIdx] = (curLines[lineIdx] ?? "") + nextChar;
-
-                //           return { ...m, lines: curLines, streaming: true };
-                //         })
-                //       );
-
-                //       charIdx += 1;
-
-                //       if (charIdx >= currentFull.length) {
-                //         lineIdx += 1;
-                //         charIdx = 0;
-
-                //         setMessages((prev) =>
-                //           prev.map((m) => {
-                //             if (m.id !== aiId) return m;
-                //             const curLines = Array.isArray(m.lines) ? [...m.lines] : [];
-                //             if (lineIdx < all.length) curLines.push("");
-                //             return { ...m, lines: curLines, streaming: lineIdx < all.length };
-                //           })
-                //         );
-
-                //         if (lineIdx >= all.length) {
-                //           if (lineTimer.current) window.clearInterval(lineTimer.current);
-                //           lineTimer.current = null;
-
-                //           setMessages((prev) =>
-                //             prev.map((m) =>
-                //               m.id === aiId ? { ...m, streaming: false, done: true } : m
-                //             )
-                //           );
-
-                //           delete fullLinesRef.current[aiId];
-
-                //           window.setTimeout(() => {
-                //             setMessages((prev) =>
-                //               prev.map((m) => (m.id === aiId ? { ...m, done: false } : m))
-                //             );
-                //           }, 1200);
-
-                //           afterDone?.();
-                //         }
-                //       }
-                //     }, speedMs);
-                //   }
-
-                //   function addTableOnlyMessage(
-                //     kind: Mode,
-                //     items: any[],
-                //     lines?: string[],
-                //     cards?: AICard[],
-                //     actions?: AIAction[],
-                //     title?: string
-                //   ) {
-                //     setMessages((p) => [
-                //       ...p,
-                //       {
-                //         id: uid(),
-                //         role: "ai",
-                //         text: `${kind === "income" ? "Income" : "Outcome"} ${
-                //           items.length
-                //         } records`,
-                //         lines,
-                //         cards,
-                //         actions,
-                //         table: { title: title ?? `Total ${items.length}`, rows: items, kind },
-                //       },
-                //     ]);
-                //   }
-
-                //   function addReportMessage(kind: Mode | "mixed", ai: any) {
-                //     const payload = getPayload(ai);
-                //     const report = payload?.report ?? ai?.report ?? null;
-                //     const lines = pickLines(ai);
-                //     const cards = pickCards(ai);
-                //     const actions = pickActions(ai);
-
-                //     if (lines.length > 0) {
-                //       draftLines(
-                //         lines,
-                //         { cards, actions },
-                //         () => {
-                //           setMessages((p) => [
-                //             ...p,
-                //             { id: uid(), role: "ai", text: "", report, reportKind: kind },
-                //           ]);
-                //         }
-                //       );
-                //       return;
-                //     }
-
-                //     setMessages((p) => [
-                //       ...p,
-                //       {
-                //         id: uid(),
-                //         role: "ai",
-                //         text: pickAnswerText(ai),
-                //         cards,
-                //         actions,
-                //         report,
-                //         reportKind: kind,
-                //       },
-                //     ]);
-                //   }
-
-                //   function addChartMessage(kind: Mode, ai: any) {
-                //     const lines = pickLines(ai);
-                //     const cards = pickCards(ai);
-                //     const actions = pickActions(ai);
-                //     const { series, filters } = pickChartSeries(ai);
-
-                //     setMessages((p) => [
-                //       ...p,
-                //       {
-                //         id: uid(),
-                //         role: "ai",
-                //         text: pickAnswerText(ai),
-                //         lines: lines.length ? lines : undefined,
-                //         cards,
-                //         actions,
-                //         chart: { series, filters, kind },
-                //       },
-                //     ]);
-                //   }
-
-                //   function addImageMessage(kind: Mode | "mixed", ai: any) {
-                //     const lines = pickLines(ai);
-                //     const cards = pickCards(ai);
-                //     const actions = pickActions(ai);
-                //     const img = pickImage(ai);
-                //     const poster = pickPoster(ai);
-
-                //     setMessages((p) => [
-                //       ...p,
-                //       {
-                //         id: uid(),
-                //         role: "ai",
-                //         text: pickAnswerText(ai),
-                //         lines: lines.length ? lines : undefined,
-                //         cards,
-                //         actions,
-                //         image: img ? { ...img, kind, poster } : undefined,
-                //       },
-                //     ]);
-                //   }
-
-                //   function openConfirmForOutcome(ai: any) {
-                //     const p = getPayload(ai);
-
-                //     const missing: string[] = Array.isArray(p?.missing_fields)
-                //       ? p.missing_fields
-                //       : Array.isArray(ai?.missing_fields)
-                //       ? ai.missing_fields
-                //       : [];
-
-                //     const suggestions: string[] = Array.isArray(p?.bank_suggestions)
-                //       ? p.bank_suggestions
-                //       : Array.isArray(ai?.bank_suggestions)
-                //       ? ai.bank_suggestions
-                //       : [];
-
-                //     const suggestedDateISO = String(
-                //       p?.suggested_date ?? ai?.suggested_date ?? new Date().toISOString()
-                //     );
-
-                //     const currentBank = String(p?.bank ?? ai?.bank ?? "").trim();
-
-                //     const d = new Date(suggestedDateISO);
-                //     const yyyy = d.getFullYear();
-                //     const mm = String(d.getMonth() + 1).padStart(2, "0");
-                //     const dd = String(d.getDate()).padStart(2, "0");
-                //     const ymd = `${yyyy}-${mm}-${dd}`;
-
-                //     setDraftAI(ai);
-                //     setDraftKind("outcome");
-
-                //     if (currentBank) setConfirmBank(currentBank);
-                //     else if (suggestions.length) setConfirmBank(String(suggestions[0]));
-                //     else setConfirmBank("Cash");
-
-                //     setConfirmDate(ymd);
-
-                //     const needsConfirm = Boolean(
-                //       p?.needs_confirm ?? ai?.needs_confirm ?? false
-                //     );
-                //     if (needsConfirm || missing.includes("bank") || missing.includes("date")) {
-                //       setConfirmOpen(true);
-                //     } else {
-                //       saveOutcome(ai).catch(console.error);
-                //     }
-                //   }
-
-                //   function openConfirmForIncome(ai: any) {
-                //     const p = getPayload(ai);
-
-                //     const missing: string[] = Array.isArray(p?.missing_fields)
-                //       ? p.missing_fields
-                //       : Array.isArray(ai?.missing_fields)
-                //       ? ai.missing_fields
-                //       : [];
-
-                //     const suggestedDateISO = String(
-                //       p?.suggested_date ?? ai?.suggested_date ?? new Date().toISOString()
-                //     );
-
-                //     const d = new Date(suggestedDateISO);
-                //     const yyyy = d.getFullYear();
-                //     const mm = String(d.getMonth() + 1).padStart(2, "0");
-                //     const dd = String(d.getDate()).padStart(2, "0");
-                //     const ymd = `${yyyy}-${mm}-${dd}`;
-                //     const ym = `${yyyy}-${mm}`;
-
-                //     const currentCompany = String(
-                //       p?.company ?? p?.compamy ?? ai?.company ?? ai?.compamy ?? ""
-                //     ).trim();
-
-                //     const currentMonth = String(p?.month ?? ai?.month ?? "").trim();
-
-                //     setDraftAI(ai);
-                //     setDraftKind("income");
-
-                //     setConfirmDate(ymd);
-                //     setConfirmMonth(currentMonth || ym);
-                //     setConfirmCompany(currentCompany || "Salary");
-
-                //     const needsConfirm = Boolean(
-                //       p?.needs_confirm ?? ai?.needs_confirm ?? false
-                //     );
-                //     if (
-                //       needsConfirm ||
-                //       missing.includes("company") ||
-                //       missing.includes("month") ||
-                //       missing.includes("date")
-                //     ) {
-                //       setConfirmOpen(true);
-                //     } else {
-                //       saveIncome(ai).catch(console.error);
-                //     }
-                //   }
-
-                //   async function onConfirmSave() {
-                //     if (!draftAI) {
-                //       setConfirmOpen(false);
-                //       return;
-                //     }
-
-                //     try {
-                //       setConfirmLoading(true);
-
-                //       const dateISO = confirmDate
-                //         ? new Date(`${confirmDate}T00:00:00.000Z`).toISOString()
-                //         : new Date().toISOString();
-
-                //       if (draftKind === "outcome") {
-                //         await saveOutcome(draftAI, { bank: confirmBank || "—", dateISO });
-
-                //         setMessages((p) => [
-                //           ...p,
-                //           {
-                //             id: uid(),
-                //             role: "ai",
-                //             text: "",
-                //             lines: [
-                //               "✅ Saved (Outcome)",
-                //               `Bank: \`${confirmBank || "—"}\``,
-                //               `Date: \`${confirmDate || "—"}\``,
-                //             ],
-                //             streaming: false,
-                //             done: true,
-                //           },
-                //         ]);
-                //       } else {
-                //         await saveIncome(draftAI, {
-                //           company: confirmCompany || "—",
-                //           month: confirmMonth || "",
-                //           dateISO,
-                //         });
-
-                //         setMessages((p) => [
-                //           ...p,
-                //           {
-                //             id: uid(),
-                //             role: "ai",
-                //             text: "",
-                //             lines: [
-                //               "✅ Saved (Income)",
-                //               `Company: \`${confirmCompany || "—"}\``,
-                //               `Month: \`${confirmMonth || "—"}\``,
-                //               `Date: \`${confirmDate || "—"}\``,
-                //             ],
-                //             streaming: false,
-                //             done: true,
-                //           },
-                //         ]);
-                //       }
-
-                //       setConfirmOpen(false);
-                //       setDraftAI(null);
-                //     } catch (e: any) {
-                //       console.error(e);
-                //       streamAIText(`❌ ${e?.message ?? "Save failed"}`);
-                //     } finally {
-                //       setConfirmLoading(false);
-                //     }
-                //   }
-
-                //   const bankSuggestions = useMemo(() => {
-                //     const p = draftAI ? getPayload(draftAI) : null;
-                //     const list: string[] = Array.isArray(p?.bank_suggestions)
-                //       ? p.bank_suggestions
-                //       : Array.isArray(draftAI?.bank_suggestions)
-                //       ? draftAI.bank_suggestions
-                //       : [];
-                //     return list.length
-                //       ? list
-                //       : [
-                //           "Cash",
-                //           "PayPay",
-                //           "LINE Pay",
-                //           "Suica",
-                //           "JCB 7/11",
-                //           "Visa UFL",
-                //           "VISA SMBC",
-                //         ];
-                //   }, [draftAI]);
-
-                //   async function sendWithValue(raw: string) {
-                //     const t = raw.trim();
-                //     if (!t || loading) return;
-
-                //     setMessages((p) => [...p, { id: uid(), role: "user", text: t }]);
-                //     setText("");
-                //     setLoading(true);
-
-                //     try {
-                //       const { ai, kind } = await smartParseAny(t);
-                //       const lines = pickLines(ai);
-                //       const cards = pickCards(ai);
-                //       const actions = pickActions(ai);
-
-                //       const payload = getPayload(ai);
-                //       const intent = String(ai?.intent ?? payload?.intent ?? "");
-
-                //       const detectedByIntent = detectKindByIntent(ai);
-                //       const kindFinal = (detectedByIntent !== "mixed"
-                //         ? detectedByIntent
-                //         : kind === "mixed"
-                //         ? detectKindByText(t) === "income"
-                //           ? "income"
-                //           : "outcome"
-                //         : kind) as Mode;
-
-                //       if (
-                //         intent === "outcome_image" ||
-                //         intent === "income_image" ||
-                //         intent === "poster_image"
-                //       ) {
-                //         const imgKind = intent === "poster_image" ? "mixed" : kindFinal;
-                //         if (lines.length > 0) {
-                //           draftLines(lines, { cards, actions }, () => addImageMessage(imgKind, ai));
-                //         } else {
-                //           addImageMessage(imgKind, ai);
-                //         }
-                //         return;
-                //       }
-
-                //       if (intent === "charts_outcomes" || intent === "charts_incomes") {
-                //         addChartMessage(kindFinal, ai);
-                //         return;
-                //       }
-
-                //       if (
-                //         intent === "list_outcomes" ||
-                //         intent === "list_incomes" ||
-                //         intent === "query_outcome"
-                //       ) {
-                //         let items: any[] = Array.isArray(payload?.items)
-                //           ? payload.items
-                //           : Array.isArray(ai?.items)
-                //           ? ai.items
-                //           : [];
-
-                //         if (
-                //           items.length === 0 &&
-                //           typeof ai?.answer === "string" &&
-                //           intent === "list_outcomes"
-                //         ) {
-                //           items = parseItemsFromAnswer(ai.answer);
-                //         }
-
-                //         addTableOnlyMessage(
-                //           kindFinal,
-                //           items,
-                //           lines.length ? lines : undefined,
-                //           cards,
-                //           actions,
-                //           payload?.meta?.title ?? undefined
-                //         );
-                //         return;
-                //       }
-
-                //       if (intent === "next_steps_report" || intent === "income_report") {
-                //         addReportMessage(kindFinal, ai);
-                //         return;
-                //       }
-
-                //       if (intent === "create_outcome") {
-                //         if (lines.length > 0) {
-                //           draftLines(lines, { cards, actions }, () => openConfirmForOutcome(ai));
-                //         } else {
-                //           openConfirmForOutcome(ai);
-                //         }
-                //         return;
-                //       }
-
-                //       if (intent === "create_income") {
-                //         if (lines.length > 0) {
-                //           draftLines(lines, { cards, actions }, () => openConfirmForIncome(ai));
-                //         } else {
-                //           openConfirmForIncome(ai);
-                //         }
-                //         return;
-                //       }
-
-                //       if (lines.length > 0) {
-                //         draftLines(lines, { cards, actions });
-                //         return;
-                //       }
-
-                //       setMessages((p) => [
-                //         ...p,
-                //         {
-                //           id: uid(),
-                //           role: "ai",
-                //           text: pickAnswerText(ai),
-                //           cards,
-                //           actions,
-                //         },
-                //       ]);
-                //     } catch (e: any) {
-                //       console.error(e);
-                //       streamAIText(`❌ ${e?.message ?? "AI error. Please try again."}`);
-                //     } finally {
-                //       setLoading(false);
-                //     }
-                //   }
-
-                //   async function send() {
-                //     await sendWithValue(text);
-                //   }
-
-                //   async function onActionClick(action: AIAction) {
-                //     const actionType = String(action?.type ?? "");
-                //     const value = String(action?.value ?? "").trim();
-
-                //     if (actionType === "prompt" && value) {
-                //       await sendWithValue(value);
-                //       return;
-                //     }
-
-                //     if (actionType === "download_image") {
-                //       const lastImage = [...messages].reverse().find((m) => m.image?.src);
-                //       if (lastImage?.image?.src) {
-                //         const filename = (
-                //           lastImage.image.title ||
-                //           lastImage.image.poster?.title ||
-                //           "image"
-                //         )
-                //           .replace(/[^\w\-]+/g, "_")
-                //           .slice(0, 40);
-                //         downloadDataUrl(lastImage.image.src, `${filename}.png`);
-                //       }
-                //       return;
-                //     }
-
-                //     if (actionType === "confirm_save_outcome" && draftAI) {
-                //       setConfirmOpen(true);
-                //       return;
-                //     }
-
-                //     if (value) {
-                //       await sendWithValue(value);
-                //     }
-                //   }
-
-                //   const lastTableMsg = useMemo(() => {
-                //     for (let i = messages.length - 1; i >= 0; i--) {
-                //       if (messages[i].role === "ai" && messages[i].table) return messages[i];
-                //     }
-                //     return null;
-                //   }, [messages]);
-
-                //   const lastChartMsg = useMemo(() => {
-                //     for (let i = messages.length - 1; i >= 0; i--) {
-                //       if (messages[i].role === "ai" && messages[i].chart?.series)
-                //         return messages[i];
-                //     }
-                //     return null;
-                //   }, [messages]);
-
-                //   const lastImageMsg = useMemo(() => {
-                //     for (let i = messages.length - 1; i >= 0; i--) {
-                //       if (messages[i].role === "ai" && messages[i].image?.src)
-                //         return messages[i];
-                //     }
-                //     return null;
-                //   }, [messages]);
-
-                //   return (
-                //     <div className="flex h-screen flex-col bg-background">
-                //       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-                //         <DialogContent className="sm:max-w-[560px]">
-                //           <DialogHeader>
-                //             <DialogTitle>
-                //               {draftKind === "income"
-                //                 ? "Confirm Income Save"
-                //                 : "Confirm Outcome Save"}
-                //             </DialogTitle>
-                //             <DialogDescription>
-                //               {draftKind === "income"
-                //                 ? "Company / Month / Date မပါရင် ဒီမှာရွေးပြီး Save လုပ်ပါ ✅"
-                //                 : "Bank / Date မပါရင် ဒီမှာရွေးပြီး Save လုပ်ပါ ✅"}
-                //             </DialogDescription>
-                //           </DialogHeader>
-
-                //           <div className="space-y-3">
-                //             <div className="rounded-2xl border bg-muted/30 p-3 text-sm">
-                //               <div className="font-semibold">Draft</div>
-
-                //               {draftKind === "income" ? (
-                //                 <div className="mt-2 grid gap-1 text-muted-foreground">
-                //                   <div>
-                //                     Company:{" "}
-                //                     <span className="font-semibold text-foreground">
-                //                       {String(
-                //                         getPayload(draftAI)?.company ??
-                //                           getPayload(draftAI)?.compamy ??
-                //                           draftAI?.company ??
-                //                           draftAI?.compamy ??
-                //                           "—"
-                //                       )}
-                //                     </span>
-                //                   </div>
-                //                   <div>
-                //                     Amount:{" "}
-                //                     <span className="font-semibold text-foreground">
-                //                       {String(
-                //                         getPayload(draftAI)?.amount ?? draftAI?.amount ?? "—"
-                //                       )}
-                //                     </span>
-                //                   </div>
-                //                   <div>
-                //                     Notice:{" "}
-                //                     <span className="font-semibold text-foreground">
-                //                       {String(
-                //                         getPayload(draftAI)?.notice ?? draftAI?.notice ?? "—"
-                //                       )}
-                //                     </span>
-                //                   </div>
-                //                 </div>
-                //               ) : (
-                //                 <div className="mt-2 grid gap-1 text-muted-foreground">
-                //                   <div>
-                //                     Shop:{" "}
-                //                     <span className="font-semibold text-foreground">
-                //                       {String(
-                //                         getPayload(draftAI)?.shop ?? draftAI?.shop ?? "—"
-                //                       )}
-                //                     </span>
-                //                   </div>
-                //                   <div>
-                //                     Amount:{" "}
-                //                     <span className="font-semibold text-foreground">
-                //                       {String(
-                //                         getPayload(draftAI)?.amount ?? draftAI?.amount ?? "—"
-                //                       )}
-                //                     </span>
-                //                   </div>
-                //                   <div>
-                //                     Notice:{" "}
-                //                     <span className="font-semibold text-foreground">
-                //                       {String(
-                //                         getPayload(draftAI)?.notice ?? draftAI?.notice ?? "—"
-                //                       )}
-                //                     </span>
-                //                   </div>
-                //                 </div>
-                //               )}
-                //             </div>
-
-                //             {draftKind === "income" ? (
-                //               <>
-                //                 <div className="space-y-1">
-                //                   <div className="text-xs font-semibold text-muted-foreground">
-                //                     Company
-                //                   </div>
-                //                   <Input
-                //                     value={confirmCompany}
-                //                     onChange={(e) => setConfirmCompany(e.target.value)}
-                //                     placeholder="e.g. Salary / ABC Co., Ltd."
-                //                   />
-                //                 </div>
-
-                //                 <div className="space-y-1">
-                //                   <div className="text-xs font-semibold text-muted-foreground">
-                //                     Month (YYYY-MM)
-                //                   </div>
-                //                   <Input
-                //                     value={confirmMonth}
-                //                     onChange={(e) => setConfirmMonth(e.target.value)}
-                //                     placeholder="2026-03"
-                //                   />
-                //                 </div>
-
-                //                 <div className="space-y-1">
-                //                   <div className="text-xs font-semibold text-muted-foreground">
-                //                     Date
-                //                   </div>
-                //                   <Input
-                //                     type="date"
-                //                     value={confirmDate}
-                //                     onChange={(e) => setConfirmDate(e.target.value)}
-                //                   />
-                //                 </div>
-                //               </>
-                //             ) : (
-                //               <>
-                //                 <div className="space-y-1">
-                //                   <div className="text-xs font-semibold text-muted-foreground">
-                //                     Bank
-                //                   </div>
-                //                   <select
-                //                     className="h-10 w-full rounded-xl border bg-background px-3 text-sm"
-                //                     value={confirmBank}
-                //                     onChange={(e) => setConfirmBank(e.target.value)}
-                //                   >
-                //                     {bankSuggestions.map((b) => (
-                //                       <option key={b} value={b}>
-                //                         {b}
-                //                       </option>
-                //                     ))}
-                //                   </select>
-                //                 </div>
-
-                //                 <div className="space-y-1">
-                //                   <div className="text-xs font-semibold text-muted-foreground">
-                //                     Date
-                //                   </div>
-                //                   <Input
-                //                     type="date"
-                //                     value={confirmDate}
-                //                     onChange={(e) => setConfirmDate(e.target.value)}
-                //                   />
-                //                   <div className="text-[11px] text-muted-foreground">
-                //                     Calendar က auto ပေါ်လာပြီး ရွေးလို့ရပါတယ် ✅
-                //                   </div>
-                //                 </div>
-                //               </>
-                //             )}
-                //           </div>
-
-                //           <DialogFooter className="gap-2 sm:gap-0">
-                //             <Button
-                //               variant="outline"
-                //               onClick={() => {
-                //                 setConfirmOpen(false);
-                //                 setDraftAI(null);
-                //               }}
-                //               disabled={confirmLoading}
-                //             >
-                //               Cancel
-                //             </Button>
-                //             <Button onClick={onConfirmSave} disabled={confirmLoading}>
-                //               {confirmLoading ? "Saving..." : "Save ✅"}
-                //             </Button>
-                //           </DialogFooter>
-                //         </DialogContent>
-                //       </Dialog>
-
-                //       <div className="w-full flex-1 overflow-y-auto">
-                //         <div className="mx-auto w-full max-w-5xl px-4 py-6">
-                //           {messages.map((m) => (
-                //             <div key={m.id} className="mb-5 w-full">
-                //               {m.role === "user" ? (
-                //                 <div className="ml-auto flex max-w-[92%] items-start justify-end gap-3 sm:max-w-[80%]">
-                //                   <div className="whitespace-pre-wrap rounded-3xl bg-primary px-4 py-3 text-sm leading-6 text-primary-foreground shadow-sm">
-                //                     {m.text}
-                //                   </div>
-                //                   <UserAvatar />
-                //                 </div>
-                //               ) : (
-                //                 <div className="flex w-full items-start gap-3">
-                //                   <AIAvatar />
-
-                //                   <div className="min-w-0 max-w-[92%] sm:max-w-[80%]">
-                //                     {m.lines ? (
-                //                       <PrettyLinesBubble
-                //                         lines={m.lines}
-                //                         streaming={m.streaming}
-                //                         done={m.done}
-                //                       />
-                //                     ) : (
-                //                       <div className="whitespace-pre-wrap rounded-3xl border bg-muted/50 px-4 py-3 text-sm leading-6 shadow-sm">
-                //                         {m.text}
-                //                         {m.streaming ? (
-                //                           <span className="ml-1 inline-block w-2 animate-pulse">
-                //                             ▍
-                //                           </span>
-                //                         ) : null}
-                //                       </div>
-                //                     )}
-
-                //                     {m.cards?.length ? <CardsRow cards={m.cards} /> : null}
-
-                //                     {m.actions?.length ? (
-                //                       <div className="mt-3 flex flex-wrap gap-2">
-                //                         {m.actions.map((a, i) => (
-                //                           <Button
-                //                             key={`${a.label}-${i}`}
-                //                             variant="outline"
-                //                             size="sm"
-                //                             onClick={() => onActionClick(a)}
-                //                           >
-                //                             {a.label || "Action"}
-                //                           </Button>
-                //                         ))}
-                //                       </div>
-                //                     ) : null}
-
-                //                     {m.role === "ai" && m.table && m.id === lastTableMsg?.id ? (
-                //                       m.table.kind === "income" ? (
-                //                         <IncomesTableCard
-                //                           title={m.table.title ?? ""}
-                //                           rows={Array.isArray(m.table.rows) ? m.table.rows : []}
-                //                         />
-                //                       ) : (
-                //                         <OutcomesTableCard
-                //                           title={m.table.title ?? ""}
-                //                           rows={Array.isArray(m.table.rows) ? m.table.rows : []}
-                //                         />
-                //                       )
-                //                     ) : null}
-
-                //                     {m.role === "ai" &&
-                //                     m.chart?.series &&
-                //                     m.id === lastChartMsg?.id ? (
-                //                       <ChartCard
-                //                         title={
-                //                           m.chart.kind === "income"
-                //                             ? "Income Charts"
-                //                             : "Outcome Charts"
-                //                         }
-                //                       >
-                //                         {m.chart.kind === "income" ? (
-                //                           <IncomeChartsCard
-                //                             series={{
-                //                               trend: m.chart.series.trend ?? [],
-                //                               byCompany:
-                //                                 (m.chart.series as any).byCompany ?? [],
-                //                             }}
-                //                           />
-                //                         ) : (
-                //                           <OutcomeChartsCard series={m.chart.series as any} />
-                //                         )}
-                //                       </ChartCard>
-                //                     ) : null}
-
-                //                     {m.role === "ai" &&
-                //                     m.image?.src &&
-                //                     m.id === lastImageMsg?.id ? (
-                //                       <ImageCard
-                //                         title={m.image.title}
-                //                         src={m.image.src}
-                //                         kind={m.image.kind}
-                //                         poster={m.image.poster}
-                //                       />
-                //                     ) : null}
-
-                //                     {m.role === "ai" && m.report ? (
-                //                       <ReportCard
-                //                         report={m.report}
-                //                         title={
-                //                           m.reportKind === "income"
-                //                             ? "Income Report"
-                //                             : m.reportKind === "outcome"
-                //                             ? "Outcome Report"
-                //                             : "Report"
-                //                         }
-                //                       />
-                //                     ) : null}
-                //                   </div>
-                //                 </div>
-                //               )}
-                //             </div>
-                //           ))}
-
-                //           {loading && (
-                //             <div className="text-xs text-muted-foreground">AI thinking…</div>
-                //           )}
-                //           <div ref={bottomRef} />
-                //         </div>
-                //       </div>
-
-                //       <div className="border-t bg-background/80 p-3 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-                //         <div className="mx-auto flex max-w-5xl gap-2">
-                //           <Input
-                //             value={text}
-                //             onChange={(e) => setText(e.target.value)}
-                //             placeholder='Try: "Lawson 980 snack" / "salary 300000" / "ဒီလ outcome chart ပြ" / "ဒီလ outcome data ကို image အဖြစ်ထုတ်ပေးပါ" / "poster: Title | Subtitle | bullet1, bullet2" / "insight report ထုတ်ပေး"'
-                //             onKeyDown={(e) => {
-                //               // @ts-ignore
-                //               if (e.nativeEvent?.isComposing) return;
-                //               if (e.key === "Enter") send();
-                //             }}
-                //           />
-
-                //           <Button onClick={send} disabled={loading}>
-                //             <Send className="h-4 w-4" />
-                //           </Button>
-                //         </div>
-                //       </div>
-                //     </div>
-                //   );
-                // }

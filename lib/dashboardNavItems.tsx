@@ -8,6 +8,7 @@ import {
   IconArrowUpRight,
   IconCalendar,
   IconChartBar,
+  IconWallet,
   IconSettings,
 } from "@tabler/icons-react";
 import { FaRegFileCode } from "react-icons/fa";
@@ -32,6 +33,12 @@ export const dashboardNavItems = [
     title: "Outcome",
     icon: <IconArrowUpRight className="h-full w-full text-red-500" />,
     href: "/dashboard/outcome",
+  },
+
+  {
+    title: "ငွေလွှဲစာရင်း",
+    icon: <IconWallet className="h-full w-full text-sky-500" />,
+    href: "/dashboard/money",
   },
 
   {

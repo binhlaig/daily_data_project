@@ -10,6 +10,42 @@ import { connectToDB } from "../mongoDB/mongoDB";
 
 type DailyPoint = { date: string; income: number; outcome: number; profit: number };
 
+async function sumIncomeByCreatedAtRange(start?: Date, end?: Date) {
+  const match =
+    start && end ? [{ $match: { createdAt: { $gte: start, $lte: end } } }] : [];
+
+  const [row] = await Income.aggregate([
+    ...match,
+    { $group: { _id: null, total: { $sum: "$amount" } } },
+  ]);
+
+  return Number(row?.total ?? 0);
+}
+
+async function sumOutcomeByCreatedAtRange(start?: Date, end?: Date) {
+  const match =
+    start && end ? [{ $match: { createdAt: { $gte: start, $lte: end } } }] : [];
+
+  const [row] = await Outcome.aggregate([
+    ...match,
+    {
+      $project: {
+        amountNumber: {
+          $convert: {
+            input: "$amount",
+            to: "double",
+            onError: 0,
+            onNull: 0,
+          },
+        },
+      },
+    },
+    { $group: { _id: null, total: { $sum: "$amountNumber" } } },
+  ]);
+
+  return Number(row?.total ?? 0);
+}
+
 function formatDayTokyo(d: Date) {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Tokyo",
@@ -24,14 +60,7 @@ function formatDayTokyo(d: Date) {
 export async function fetchIncomesTotal() {
   try {
     await connectToDB();
-
-    const incomes = await Income.find({});
-    const total = incomes.reduce(
-      (acc, income) => acc + Number(income.amount || 0),
-      0
-    );
-
-    return total;
+    return await sumIncomeByCreatedAtRange();
   } catch (err) {
     console.log(err);
     return 0;
@@ -64,23 +93,10 @@ export async function fetchTodayTotals() {
   const end = new Date();
   end.setHours(23, 59, 59, 999);
 
-  const incomes = await Income.find({
-    createdAt: { $gte: start, $lte: end },
-  });
-
-  const outcomes = await Outcome.find({
-    createdAt: { $gte: start, $lte: end },
-  });
-
-  const incomeToday = incomes.reduce(
-    (acc, i) => acc + Number(i.amount || 0),
-    0
-  );
-
-  const outcomeToday = outcomes.reduce(
-    (acc, o) => acc + Number(o.amount || 0),
-    0
-  );
+  const [incomeToday, outcomeToday] = await Promise.all([
+    sumIncomeByCreatedAtRange(start, end),
+    sumOutcomeByCreatedAtRange(start, end),
+  ]);
 
   return {
     incomeToday,
@@ -102,23 +118,10 @@ export async function fetchMonthTotals() {
   const start = new Date(now.getFullYear(), now.getMonth(), 1);
   const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
 
-  const incomes = await Income.find({
-    createdAt: { $gte: start, $lte: end },
-  });
-
-  const outcomes = await Outcome.find({
-    createdAt: { $gte: start, $lte: end },
-  });
-
-  const incomeMonth = incomes.reduce(
-    (acc, i) => acc + Number(i.amount || 0),
-    0
-  );
-
-  const outcomeMonth = outcomes.reduce(
-    (acc, o) => acc + Number(o.amount || 0),
-    0
-  );
+  const [incomeMonth, outcomeMonth] = await Promise.all([
+    sumIncomeByCreatedAtRange(start, end),
+    sumOutcomeByCreatedAtRange(start, end),
+  ]);
 
   return {
     incomeMonth,
@@ -162,12 +165,10 @@ function tokyoLikeRange(timezone: string, type: "today" | "month") {
 export async function fetchTodayTotalsTZ(timezone = "Asia/Tokyo") {
   await connectToDB();
   const { start, end } = tokyoLikeRange(timezone, "today");
-
-  const incomes = await Income.find({ createdAt: { $gte: start, $lte: end } });
-  const outcomes = await Outcome.find({ createdAt: { $gte: start, $lte: end } });
-
-  const incomeToday = incomes.reduce((a, i) => a + Number(i.amount || 0), 0);
-  const outcomeToday = outcomes.reduce((a, o) => a + Number(o.amount || 0), 0);
+  const [incomeToday, outcomeToday] = await Promise.all([
+    sumIncomeByCreatedAtRange(start, end),
+    sumOutcomeByCreatedAtRange(start, end),
+  ]);
 
   return { incomeToday, outcomeToday, profitToday: incomeToday - outcomeToday };
 }
@@ -175,12 +176,10 @@ export async function fetchTodayTotalsTZ(timezone = "Asia/Tokyo") {
 export async function fetchMonthTotalsTZ(timezone = "Asia/Tokyo") {
   await connectToDB();
   const { start, end } = tokyoLikeRange(timezone, "month");
-
-  const incomes = await Income.find({ createdAt: { $gte: start, $lte: end } });
-  const outcomes = await Outcome.find({ createdAt: { $gte: start, $lte: end } });
-
-  const incomeMonth = incomes.reduce((a, i) => a + Number(i.amount || 0), 0);
-  const outcomeMonth = outcomes.reduce((a, o) => a + Number(o.amount || 0), 0);
+  const [incomeMonth, outcomeMonth] = await Promise.all([
+    sumIncomeByCreatedAtRange(start, end),
+    sumOutcomeByCreatedAtRange(start, end),
+  ]);
 
   return { incomeMonth, outcomeMonth, profitMonth: incomeMonth - outcomeMonth };
 }
@@ -273,14 +272,7 @@ export async function fetchIncomes() {
 export async function totalOutcometest() {
   try {
     await connectToDB();
-    const outcomes = await Outcome.find().lean();
-
-    const total = (outcomes ?? []).reduce((acc: number, o: any) => {
-      const n = Number(String(o?.amount ?? 0).replace(/[^\d.-]/g, ""));
-      return acc + (Number.isFinite(n) ? n : 0);
-    }, 0);
-
-    return total;
+    return await sumOutcomeByCreatedAtRange();
   } catch (e) {
     console.log(e);
     return 0;

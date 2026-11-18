@@ -1,4 +1,3 @@
-
 // // "use client";
 
 // // import React from "react";
@@ -104,9 +103,6 @@
 // //     </div>
 // //   );
 // // }
-
-
-
 
 // "use client";
 
@@ -540,16 +536,13 @@
 //   );
 // }
 
-
-
-
-
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
+import { Copy, Check } from "lucide-react";
 
 import {
   CheckCircle2,
@@ -662,6 +655,21 @@ function withLeadingAutoIcon(children: React.ReactNode) {
 }
 
 export default function NoteMarkdown({ content }: { content: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+
+      setTimeout(() => {
+        setCopied(false);
+      }, 2000);
+    } catch (err) {
+      console.error("Copy failed", err);
+    }
+  };
+
   return (
     <div className="prose max-w-none dark:prose-invert">
       <ReactMarkdown
@@ -670,8 +678,9 @@ export default function NoteMarkdown({ content }: { content: string }) {
         components={{
           // ✅ paragraph with auto icon
           p: ({ children }) => {
-            const { icon, children: nextChildren } =
-              withLeadingAutoIcon(children);
+            const { icon, children: nextChildren } = withLeadingAutoIcon(
+              children
+            );
 
             if (icon) {
               return (
@@ -691,8 +700,9 @@ export default function NoteMarkdown({ content }: { content: string }) {
 
           // ✅ list item with auto icon
           li: ({ children }) => {
-            const { icon, children: nextChildren } =
-              withLeadingAutoIcon(children);
+            const { icon, children: nextChildren } = withLeadingAutoIcon(
+              children
+            );
 
             if (icon) {
               return (
@@ -731,12 +741,24 @@ export default function NoteMarkdown({ content }: { content: string }) {
                 <div className="flex items-center justify-between border-b bg-background/40 px-4 py-2">
                   <div className="text-xs font-medium">{label}</div>
 
-                  <button
+                  {/* <button
                     onClick={() => navigator.clipboard.writeText(rawText)}
                     className="text-xs rounded-md border px-2 py-1 hover:bg-muted transition"
                     title="Copy"
                   >
                     Copy
+                  </button> */}
+
+                  <button
+                    onClick={() => handleCopy(rawText)}
+                    className="flex items-center gap-1 text-xs rounded-md border px-2 py-1 hover:bg-muted transition"
+                  >
+                    {copied ? (
+                      <Check className="h-3 w-3" />
+                    ) : (
+                      <Copy className="h-3 w-3" />
+                    )}
+                    {copied ? "Copied" : "Copy"}
                   </button>
                 </div>
 

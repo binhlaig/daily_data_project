@@ -25,6 +25,8 @@ const IncomeSchema = new Schema(
   },
   { timestamps: true }
 );
+
+IncomeSchema.index({ createdAt: 1 });
+
 const Income = models?.Income || model("Income", IncomeSchema);
 export default Income;
-

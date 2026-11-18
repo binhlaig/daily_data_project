@@ -63,6 +63,8 @@ const OutcomeSchema = new Schema(
   { timestamps: true }
 );
 
+OutcomeSchema.index({ createdAt: 1 });
+
 const Outcome = models?.Outcome || model("Outcome", OutcomeSchema);
 
 export default Outcome;

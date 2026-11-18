@@ -17,24 +17,17 @@ import {
 } from "@/components/ui/breadcrumb";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
-import { fetchIncomesTotal, fetchOutcomes } from "@/lib/data/alldata";
+import {
+  fetchDailySeries,
+  fetchIncomesTotal,
+  fetchMonthTotals,
+  fetchTodayTotals,
+  totalOutcometest,
+} from "@/lib/data/alldata";
 import EventCalendar from "@/components/Daily/EventCalander";
 import DashboardGlowGrid from "./DashboardGlowGrid";
 import { ModeToggle } from "@/components/darkmode";
-import { fetchTodayTotals, fetchMonthTotals } from "@/lib/data/alldata";
 import DailyChartClient from "@/components/dashboard/DailyChartClient";
-import { fetchDailySeries } from "@/lib/data/alldata";
-
-const today = await fetchTodayTotals();
-const month = await fetchMonthTotals();
-
-function formatJPY(n: number) {
-  return new Intl.NumberFormat("ja-JP", {
-    style: "currency",
-    currency: "JPY",
-    maximumFractionDigits: 0,
-  }).format(n);
-}
 
 export default async function Page() {
   const h = await headers();
@@ -42,27 +35,17 @@ export default async function Page() {
     headers: Object.fromEntries(h.entries()),
   });
 
-  const totalRaw = await fetchIncomesTotal();
+  const [totalRaw, outcomeTotalRaw, today, month, daily] = await Promise.all([
+    fetchIncomesTotal(),
+    totalOutcometest(),
+    fetchTodayTotals(),
+    fetchMonthTotals(),
+    fetchDailySeries(30),
+  ]);
+
   const incomeTotal = Number(totalRaw) || 0;
-
-  const result = await fetchOutcomes();
-  const totalout = result?.totalout;
-
-  const outcomeTotal =
-    totalout?.reduce(
-      (tot: number, item: { amount: number }) => tot + Number(item.amount || 0),
-      0
-    ) ?? 0;
-
+  const outcomeTotal = Number(outcomeTotalRaw) || 0;
   const profit = incomeTotal - outcomeTotal;
-  const daily = await fetchDailySeries(30);
-
-  const profitTone =
-    profit > 0
-      ? "text-emerald-600 dark:text-emerald-400"
-      : profit < 0
-      ? "text-rose-600 dark:text-rose-400"
-      : "text-foreground";
 
   return (
     <div className="min-h-screen flex flex-col">

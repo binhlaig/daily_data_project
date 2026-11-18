@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -1794,7 +1793,6 @@ export default function ProductsSheetPage() {
 
   return (
     <div className="p-4 md:p-6 space-y-4">
-     
       <input
         ref={fileInputRef}
         type="file"
@@ -2328,12 +2326,58 @@ export default function ProductsSheetPage() {
                   ) : (
                     <div className="h-[300px]">
                       <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={barSummaryData}>
+                        {/* <BarChart data={barSummaryData}>
                           <CartesianGrid strokeDasharray="3 3" />
                           <XAxis dataKey="name" />
                           <YAxis />
                           <Tooltip />
                           <Bar dataKey="value" radius={[10, 10, 0, 0]} />
+                        </BarChart> */}
+
+                        <BarChart data={barSummaryData}>
+                          <defs>
+                            <linearGradient
+                              id="shopGradient"
+                              x1="0"
+                              y1="0"
+                              x2="0"
+                              y2="1"
+                            >
+                              <stop
+                                offset="5%"
+                                stopColor="#22c55e"
+                                stopOpacity={0.9}
+                              />
+                              <stop
+                                offset="95%"
+                                stopColor="#06b6d4"
+                                stopOpacity={0.9}
+                              />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid
+                            strokeDasharray="3 3"
+                            stroke="#e5e7eb"
+                          />
+                          <XAxis dataKey="name" hide />
+                          <YAxis
+                            tick={{ fontSize: 12 }}
+                            axisLine={false}
+                            tickLine={false}
+                          />
+                          <Tooltip
+                            cursor={{ fill: "rgba(0,0,0,0.05)" }}
+                            contentStyle={{
+                              borderRadius: "12px",
+                              border: "1px solid #e5e7eb",
+                              background: "#fff",
+                            }}
+                          />
+                          <Bar
+                            dataKey="value"
+                            radius={[10, 10, 0, 0]}
+                            fill="url(#shopGradient)"
+                          />
                         </BarChart>
                       </ResponsiveContainer>
                     </div>
@@ -2423,12 +2467,55 @@ export default function ProductsSheetPage() {
                 ) : (
                   <div className="h-[340px]">
                     <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={categoryValueChartData}>
+                      {/* <BarChart data={categoryValueChartData}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="name" />
                         <YAxis />
                         <Tooltip />
                         <Bar dataKey="value" radius={[10, 10, 0, 0]} />
+                      </BarChart> */}
+
+                      <BarChart data={categoryValueChartData}>
+                        <defs>
+                          <linearGradient
+                            id="shopGradient"
+                            x1="0"
+                            y1="0"
+                            x2="0"
+                            y2="1"
+                          >
+                            <stop
+                              offset="5%"
+                              stopColor="#22c55e"
+                              stopOpacity={0.9}
+                            />
+                            <stop
+                              offset="95%"
+                              stopColor="#06b6d4"
+                              stopOpacity={0.9}
+                            />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                        <XAxis dataKey="name" hide />
+                        <YAxis
+                          tick={{ fontSize: 12 }}
+                          axisLine={false}
+                          tickLine={false}
+                        />
+                        <Tooltip
+                          cursor={{ fill: "rgba(0,0,0,0.05)" }}
+                          contentStyle={{
+                            borderRadius: "12px",
+                            border: "1px solid #e5e7eb",
+                            background: "#fff",
+                          }}
+                        />
+                        <Bar
+                          dataKey="value"
+                          radius={[10, 10, 0, 0]}
+                          fill="url(#shopGradient)"
+                        />
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
