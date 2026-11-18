@@ -1186,7 +1186,7 @@ export default function ProductsSheetPage() {
         toastLabel: "XLSX imported from PC ✅",
       });
     } catch (e) {
-      toast.error(e?.message ?? "Import failed");
+      toast.error(e instanceof Error ? e.message : "Import failed");
     }
   };
 
@@ -1420,7 +1420,7 @@ export default function ProductsSheetPage() {
       URL.revokeObjectURL(url);
       toast.success("XLSX downloaded ✅");
     } catch (e) {
-      toast.error(e?.message ?? "Download failed");
+      toast.error(e instanceof Error ? e.message : "Download failed");
     }
   };
 
@@ -1436,7 +1436,7 @@ export default function ProductsSheetPage() {
       URL.revokeObjectURL(url);
       toast.success("CSV downloaded ✅");
     } catch (e) {
-      toast.error(e?.message ?? "CSV download failed");
+      toast.error(e instanceof Error ? e.message : "CSV download failed");
     }
   };
 
@@ -1499,7 +1499,7 @@ export default function ProductsSheetPage() {
 
       toast.error("Only .xlsx and .csv files are supported");
     } catch (e) {
-      toast.error(e?.message ?? "Link failed");
+      toast.error(e instanceof Error ? e.message : "Link failed");
     }
   };
 
@@ -1573,7 +1573,7 @@ export default function ProductsSheetPage() {
       setLocalFileName("my-sheet.csv");
       toast.success("Saved as CSV ✅");
     } catch (e) {
-      toast.error(e?.message ?? "Save failed");
+      toast.error(e instanceof Error ? e.message : "Save failed");
     }
   };
 
@@ -1606,7 +1606,7 @@ export default function ProductsSheetPage() {
         linkedFileKind === "xlsx" ? "Excel updated ✅" : "CSV updated ✅"
       );
     } catch (e) {
-      toast.error(e?.message ?? "Update failed");
+      toast.error(e instanceof Error ? e.message : "Update failed");
     }
   };
 
@@ -1630,7 +1630,7 @@ export default function ProductsSheetPage() {
       setCsvOpen(false);
       setCsvText("");
     } catch (e) {
-      toast.error(e?.message ?? "CSV import failed");
+      toast.error(e instanceof Error ? e.message : "CSV import failed");
     }
   };
 
@@ -1657,7 +1657,7 @@ export default function ProductsSheetPage() {
 
       setJsonOpen(true);
     } catch (e) {
-      toast.error(e?.message ?? "JSON export failed");
+      toast.error(e instanceof Error ? e.message : "JSON export failed");
     }
   };
 
@@ -1685,7 +1685,7 @@ export default function ProductsSheetPage() {
 
       toast.success("JSON downloaded ✅");
     } catch (e) {
-      toast.error(e?.message ?? "JSON download failed");
+      toast.error(e instanceof Error ? e.message : "JSON download failed");
     }
   };
 
